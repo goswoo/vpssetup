@@ -162,8 +162,8 @@ tui_ssh_overview() {
     fi
     if ufw_is_active; then firewall_tone="good"; else firewall_tone="bad"; fi
 
-    printf '  Текущий порт:      %s\n' "$(tui_paint accent "$SSH_OLD_PORT")"
     if [[ "$PHASE" == "ssh_pending" ]]; then
+        printf '  Старый порт:       %s\n' "$(tui_paint muted "$SSH_OLD_PORT")"
         printf '  Новый порт:        %s\n' "$(tui_paint warn "$SSH_PORT")"
     else
         printf '  Активный порт:     %s\n' "$(tui_paint accent "$SSH_PORT")"

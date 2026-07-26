@@ -350,6 +350,13 @@ python3 -m json.tool "$TEST_ROOT/status.json" >/dev/null
 assert_contains "$TEST_ROOT/status.json" '"phase":"configured"'
 pass "stable JSON status"
 
+printf '3\n0\n0\n' | run_vpssetup >"$TEST_ROOT/ssh-tui.out"
+assert_contains "$TEST_ROOT/ssh-tui.out" 'Активный порт:'
+assert_contains "$TEST_ROOT/ssh-tui.out" '55223'
+assert_not_contains "$TEST_ROOT/ssh-tui.out" 'Текущий порт:'
+assert_not_contains "$TEST_ROOT/ssh-tui.out" '55222'
+pass "configured SSH TUI hides historical port"
+
 printf '0\n' | run_vpssetup >"$TEST_ROOT/tui-main.out"
 assert_contains "$TEST_ROOT/tui-main.out" 'Следующий шаг:'
 assert_contains "$TEST_ROOT/tui-main.out" '[2] Состояние и диагностика'
