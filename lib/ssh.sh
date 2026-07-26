@@ -220,8 +220,9 @@ ssh_confirm() {
     require_root ssh confirm || return 1
     if [[ "$PHASE" == "configured" ]]; then
         if [[ "$SSH_OLD_PORT" != "$SSH_PORT" ]] &&
-            ufw_has_owned_rule "$SSH_OLD_PORT" "vpssetup:ssh-stage-old"; then
-            ufw_delete_owned_rule "vpssetup:ssh-stage-old" || return 1
+            { ufw_has_owned_rule "$SSH_OLD_PORT" "vpssetup:ssh-stage-old" ||
+                ufw_has_owned_rule "$SSH_OLD_PORT" "vpssetup:ssh-target"; }; then
+            ufw_finalize_ssh || return 1
             UFW_OLD_RULE_OWNED="false"
             save_state
             log_success "Оставшееся правило старого SSH-порта удалено"

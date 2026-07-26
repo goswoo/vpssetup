@@ -54,6 +54,13 @@ parsed_rules="$(
         ufw_rule_numbers_for_comment "vpssetup:ssh-stage-old"
 )"
 [[ "$parsed_rules" == $'12\n1' ]] || fail "UFW numbered rule parser"
+parsed_rule="$(
+    # shellcheck source=/dev/null
+    source "$PROJECT_DIR/lib/firewall.sh"
+    printf '%s\n' "$numbered_rules" |
+        ufw_rule_numbers_for_comment "vpssetup:ssh-stage-old" 22
+)"
+[[ "$parsed_rule" == $'12\n1' ]] || fail "UFW numbered port filter"
 pass "UFW numbered rule parser"
 
 INSTALL_ROOT="$(mktemp -d)"
@@ -251,6 +258,10 @@ assert_contains "$TEST_ROOT/etc/ssh/sshd_config.d/00-vpssetup.conf" 'PasswordAut
 run_vpssetup ssh confirm >/dev/null
 assert_not_contains "$TEST_ROOT/etc/ssh/sshd_config.d/00-vpssetup.conf" 'Port 55222'
 assert_contains "$TEST_ROOT/etc/ssh/sshd_config.d/00-vpssetup.conf" 'Port 55223'
+assert_not_contains "$TEST_ROOT/var/lib/vpssetup-test/ufw-rules" \
+    $'55222\tvpssetup:ssh-target'
+assert_contains "$TEST_ROOT/var/lib/vpssetup-test/ufw-rules" \
+    $'55223\tvpssetup:ssh-target'
 pass "port migration preserves hardening"
 
 run_vpssetup status --json >"$TEST_ROOT/status.json"

@@ -44,13 +44,18 @@ ufw_has_owned_rule() {
 
 ufw_rule_numbers_for_comment() {
     local comment="$1"
-    awk -v marker="$comment" '
+    local port="${2:-}"
+    awk -v marker="$comment" -v wanted_port="$port" '
         index($0, marker) {
-            value=$0
-            sub(/^[[:space:]]*\[[[:space:]]*/, "", value)
-            sub(/\].*$/, "", value)
-            gsub(/[[:space:]]/, "", value)
-            if (value ~ /^[0-9]+$/) print value
+            number=$0
+            sub(/^[[:space:]]*\[[[:space:]]*/, "", number)
+            sub(/\].*$/, "", number)
+            gsub(/[[:space:]]/, "", number)
+            rule=$0
+            sub(/^[^]]*\][[:space:]]*/, "", rule)
+            sub(/[[:space:]].*$/, "", rule)
+            if (number ~ /^[0-9]+$/ &&
+                (wanted_port == "" || rule == wanted_port "/tcp")) print number
         }
     ' |
         sort -rn
@@ -84,12 +89,14 @@ ufw_add_owned_rule() {
 
 ufw_delete_owned_rule() {
     local comment="$1"
+    local port="${2:-}"
     if is_test_mode; then
         local rules tmp
         rules="$(system_path /var/lib/vpssetup-test/ufw-rules)"
         [[ -f "$rules" ]] || return 0
         tmp="$(mktemp)"
-        awk -F'\t' -v comment="$comment" '$2 != comment' "$rules" >"$tmp"
+        awk -F'\t' -v comment="$comment" -v port="$port" \
+            '$2 != comment || (port != "" && $1 != port)' "$rules" >"$tmp"
         mv "$tmp" "$rules"
         return 0
     fi
@@ -100,7 +107,7 @@ ufw_delete_owned_rule() {
         [[ "$number" =~ ^[0-9]+$ ]] && numbers+=("$number")
     done < <(
         ufw status numbered 2>/dev/null |
-            ufw_rule_numbers_for_comment "$comment"
+            ufw_rule_numbers_for_comment "$comment" "$port"
     )
 
     for number in "${numbers[@]}"; do
@@ -150,8 +157,15 @@ ufw_prepare_stage() {
 
 ufw_finalize_ssh() {
     require_root ssh confirm || return 1
-    if [[ "$SSH_OLD_PORT" != "$SSH_PORT" && "$UFW_OLD_RULE_OWNED" == "true" ]]; then
-        ufw_delete_owned_rule "vpssetup:ssh-stage-old" || return 1
+    if [[ "$SSH_OLD_PORT" != "$SSH_PORT" ]]; then
+        if ufw_has_owned_rule "$SSH_OLD_PORT" "vpssetup:ssh-stage-old"; then
+            ufw_delete_owned_rule "vpssetup:ssh-stage-old" "$SSH_OLD_PORT" ||
+                return 1
+        fi
+        if ufw_has_owned_rule "$SSH_OLD_PORT" "vpssetup:ssh-target"; then
+            ufw_delete_owned_rule "vpssetup:ssh-target" "$SSH_OLD_PORT" ||
+                return 1
+        fi
         UFW_OLD_RULE_OWNED="false"
     fi
     save_state
