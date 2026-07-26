@@ -7,6 +7,7 @@ manager_update() {
     temp_dir="$(mktemp -d)"
     installer="$temp_dir/install.sh"
     base_url="${VPSSETUP_RAW_BASE_URL:-}"
+    commit=""
     if [[ -z "$base_url" ]]; then
         metadata="$temp_dir/github-commit.json"
         download_url \
@@ -27,6 +28,7 @@ manager_update() {
             return 1
         }
         base_url="https://raw.githubusercontent.com/goswoo/vpssetup/${commit}"
+        log_info "Commit обновления: ${commit:0:12}"
     fi
     installer_url="$base_url/install.sh"
 

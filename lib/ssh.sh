@@ -225,7 +225,6 @@ ssh_confirm() {
             ufw_finalize_ssh || return 1
             UFW_OLD_RULE_OWNED="false"
             save_state
-            log_success "Оставшееся правило старого SSH-порта удалено"
         else
             log_info "SSH hardening уже подтверждён на порту $SSH_PORT"
         fi
