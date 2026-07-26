@@ -218,6 +218,18 @@ ssh_confirm_session_is_safe() {
 
 ssh_confirm() {
     require_root ssh confirm || return 1
+    if [[ "$PHASE" == "configured" ]]; then
+        if [[ "$SSH_OLD_PORT" != "$SSH_PORT" ]] &&
+            ufw_has_owned_rule "$SSH_OLD_PORT" "vpssetup:ssh-stage-old"; then
+            ufw_delete_owned_rule "vpssetup:ssh-stage-old" || return 1
+            UFW_OLD_RULE_OWNED="false"
+            save_state
+            log_success "Оставшееся правило старого SSH-порта удалено"
+        else
+            log_info "SSH hardening уже подтверждён на порту $SSH_PORT"
+        fi
+        return 0
+    fi
     [[ "$PHASE" == "ssh_pending" ]] || {
         die "Нет ожидающего SSH-переключения"
         return 1

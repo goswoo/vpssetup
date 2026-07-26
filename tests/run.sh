@@ -42,6 +42,20 @@ run_vpssetup() {
     bash "$PROJECT_DIR/vpssetup.sh" "$@"
 }
 
+numbered_rules="$(
+    printf '[ 1] 22/tcp ALLOW IN Anywhere # vpssetup:ssh-stage-old\n'
+    printf '[12] 22/tcp (v6) ALLOW IN Anywhere (v6) # vpssetup:ssh-stage-old\n'
+    printf '[ 3] 443/tcp ALLOW IN Anywhere # vpssetup:https\n'
+)"
+parsed_rules="$(
+    # shellcheck source=/dev/null
+    source "$PROJECT_DIR/lib/firewall.sh"
+    printf '%s\n' "$numbered_rules" |
+        ufw_rule_numbers_for_comment "vpssetup:ssh-stage-old"
+)"
+[[ "$parsed_rules" == $'12\n1' ]] || fail "UFW numbered rule parser"
+pass "UFW numbered rule parser"
+
 INSTALL_ROOT="$(mktemp -d)"
 mkdir -p "$INSTALL_ROOT/etc"
 printf 'ID=ubuntu\nVERSION_ID="24.04"\n' >"$INSTALL_ROOT/etc/os-release"
@@ -214,6 +228,13 @@ assert_not_contains "$TEST_ROOT/etc/ssh/sshd_config.d/00-vpssetup.conf" 'Port 22
 assert_contains "$TEST_ROOT/etc/fail2ban/jail.d/10-vpssetup-sshd.local" 'port = 55222'
 assert_contains "$TEST_ROOT/var/lib/vpssetup/state.conf" "PHASE='configured'"
 pass "SSH confirmation hardening"
+
+printf '22\tvpssetup:ssh-stage-old\n' \
+    >>"$TEST_ROOT/var/lib/vpssetup-test/ufw-rules"
+run_vpssetup ssh confirm >/dev/null
+assert_not_contains "$TEST_ROOT/var/lib/vpssetup-test/ufw-rules" \
+    'vpssetup:ssh-stage-old'
+pass "repeated SSH confirmation cleans stale UFW rule"
 
 run_vpssetup ssh stage 55222 >/dev/null
 assert_contains "$TEST_ROOT/etc/ssh/sshd_config.d/00-vpssetup.conf" 'PermitRootLogin no'

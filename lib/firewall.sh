@@ -42,6 +42,20 @@ ufw_has_owned_rule() {
         '
 }
 
+ufw_rule_numbers_for_comment() {
+    local comment="$1"
+    awk -v marker="$comment" '
+        index($0, marker) {
+            value=$0
+            sub(/^[[:space:]]*\[[[:space:]]*/, "", value)
+            sub(/\].*$/, "", value)
+            gsub(/[[:space:]]/, "", value)
+            if (value ~ /^[0-9]+$/) print value
+        }
+    ' |
+        sort -rn
+}
+
 ufw_add_owned_rule() {
     local port="$1"
     local comment="$2"
@@ -86,14 +100,7 @@ ufw_delete_owned_rule() {
         [[ "$number" =~ ^[0-9]+$ ]] && numbers+=("$number")
     done < <(
         ufw status numbered 2>/dev/null |
-            awk -v marker="$comment" '
-                index($0, marker) {
-                    value=$1
-                    gsub(/[^0-9]/, "", value)
-                    print value
-                }
-            ' |
-            sort -rn
+            ufw_rule_numbers_for_comment "$comment"
     )
 
     for number in "${numbers[@]}"; do
