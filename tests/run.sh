@@ -167,11 +167,17 @@ assert_contains "$TEST_ROOT/var/lib/vpssetup/backups/$initial_id/manager-state.c
     "INITIAL_BACKUP_ID='$initial_id'"
 pass "initial snapshot"
 
+sed -i "s/^INITIAL_BACKUP_ID=.*/INITIAL_BACKUP_ID=''/" \
+    "$TEST_ROOT/var/lib/vpssetup/backups/$initial_id/manager-state.conf"
+sed -i "s/^LAST_BACKUP_ID=.*/LAST_BACKUP_ID=''/" \
+    "$TEST_ROOT/var/lib/vpssetup/backups/$initial_id/manager-state.conf"
 mkdir -p "$TEST_ROOT/var/lib/vpssetup-test"
 touch "$TEST_ROOT/var/lib/vpssetup-test/ufw-active"
 run_vpssetup backup restore "$initial_id" >/dev/null
 [[ ! -e "$TEST_ROOT/var/lib/vpssetup-test/ufw-active" ]] ||
     fail "snapshot did not restore inactive UFW"
+assert_contains "$TEST_ROOT/var/lib/vpssetup/state.conf" \
+    "INITIAL_BACKUP_ID='$initial_id'"
 pass "snapshot restores UFW activation state"
 
 run_vpssetup backup create restore-point >/dev/null

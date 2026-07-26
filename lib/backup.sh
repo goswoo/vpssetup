@@ -212,7 +212,8 @@ backup_restore() {
         }
     fi
 
-    local safety_id restore_ufw_state safety_ufw_state
+    local safety_id restore_ufw_state safety_ufw_state restoring_initial="false"
+    [[ "$id" == "$INITIAL_BACKUP_ID" ]] && restoring_initial="true"
     restore_ufw_state="$(backup_ufw_state "$id")"
     backup_create "pre-restore-${id}" || return 1
     safety_id="$LAST_BACKUP_ID"
@@ -240,6 +241,11 @@ backup_restore() {
     if [[ -r "$BACKUP_DIR/$id/manager-state.conf" ]]; then
         cp -a "$BACKUP_DIR/$id/manager-state.conf" "$STATE_FILE"
         load_state
+        if [[ "$restoring_initial" == "true" && -z "$INITIAL_BACKUP_ID" ]]; then
+            INITIAL_BACKUP_ID="$id"
+            [[ -n "$LAST_BACKUP_ID" ]] || LAST_BACKUP_ID="$id"
+            save_state
+        fi
     fi
     log_success "Snapshot $id восстановлен"
 }
