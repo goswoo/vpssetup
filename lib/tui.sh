@@ -175,16 +175,44 @@ tui_ipv6_action() {
     fi
 }
 
-tui_sudo_timeout_action() {
+tui_sudo_mode_label() {
+    case "$SUDO_MODE" in
+        standard) printf 'стандартный пароль' ;;
+        timeout) printf 'пароль действует 60 минут' ;;
+        nopasswd) printf 'NOPASSWD' ;;
+    esac
+}
+
+tui_sudo_action() {
     echo ""
-    echo "  Увеличивает срок действия sudo-сессии до 60 минут."
-    if [[ "$SUDO_TIMEOUT_ENABLED" == "true" ]]; then
-        confirm "Вернуть стандартный sudo timeout?" "N" &&
-            with_manager_lock module_dispatch disable sudo-timeout
-    else
-        confirm "Установить sudo timeout 60 минут?" "N" &&
-            with_manager_lock module_dispatch enable sudo-timeout
+    printf '  Текущий режим: %s\n\n' "$(tui_sudo_mode_label)"
+    echo "  [1] Стандартный запрос пароля"
+    echo "  [2] Пароль действует 60 минут"
+    echo "  [3] NOPASSWD — выполнять sudo без пароля"
+
+    local default_choice choice mode
+    case "$SUDO_MODE" in
+        standard) default_choice=1 ;;
+        timeout) default_choice=2 ;;
+        nopasswd) default_choice=3 ;;
+    esac
+    choice="$(read_choice "Режим sudo" "$default_choice")"
+    case "$choice" in
+        1) mode="standard" ;;
+        2) mode="timeout" ;;
+        3) mode="nopasswd" ;;
+        *) log_error "Неизвестный режим sudo"; return 1 ;;
+    esac
+
+    if [[ "$mode" == "$SUDO_MODE" ]] && sudo_policy_is_applied "$mode"; then
+        log_info "Выбранный режим уже активен"
+        return 0
     fi
+    if [[ "$mode" == "nopasswd" ]]; then
+        log_warn "$ADMIN_USER сможет выполнять любые команды через sudo без пароля."
+    fi
+    confirm "Применить выбранный режим sudo?" "N" &&
+        with_manager_lock module_sudo_set "$mode"
 }
 
 tui_docker_group_action() {
@@ -211,9 +239,8 @@ tui_modules_menu() {
         printf '  [2] IPv6                %s\n' \
             "$([[ -n "$IPV6_METHOD" ]] && echo "отключён ($IPV6_METHOD)" || echo "включён")"
         echo "      Включение или отключение IPv6"
-        printf '  [3] Sudo timeout        %s\n' \
-            "$([[ "$SUDO_TIMEOUT_ENABLED" == "true" ]] && echo "60 минут" || echo "стандартный")"
-        echo "      Время действия авторизации sudo"
+        printf '  [3] Sudo                %s\n' "$(tui_sudo_mode_label)"
+        echo "      Запрос пароля и время действия sudo-сессии"
         printf '  [4] Docker group        %s\n' \
             "$([[ "$DOCKER_GROUP_ADDED" == "true" ]] && echo "включена" || echo "выключена")"
         echo "      Запуск Docker без sudo"
@@ -222,7 +249,7 @@ tui_modules_menu() {
         case "$(read_choice "Настройка" "0")" in
             1) tui_swap_action; press_any_key ;;
             2) tui_ipv6_action; press_any_key ;;
-            3) tui_sudo_timeout_action; press_any_key ;;
+            3) tui_sudo_action; press_any_key ;;
             4) tui_docker_group_action; press_any_key ;;
             0) return ;;
         esac

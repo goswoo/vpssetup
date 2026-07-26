@@ -25,6 +25,7 @@ managed_backup_paths() {
 /etc/fail2ban/jail.d/10-vpssetup-sshd.local
 /etc/apt/apt.conf.d/52vpssetup-auto-upgrades
 /etc/sudoers.d/90-vpssetup-timeout
+/etc/sudoers.d/90-vpssetup-sudo
 /etc/sysctl.d/99-vpssetup-disable-ipv6.conf
 /etc/default/grub.d/99-vpssetup-ipv6.cfg
 /etc/default/ufw

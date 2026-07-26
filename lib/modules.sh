@@ -195,33 +195,96 @@ module_ipv6_disable() {
     fi
 }
 
-module_sudo_timeout_enable() {
-    require_root module sudo-timeout enable || return 1
-    local target content tmp
-    target="$(system_path /etc/sudoers.d/90-vpssetup-timeout)"
-    content="# Managed by VPSSetup
-Defaults timestamp_timeout=60
+sudo_policy_path() {
+    system_path /etc/sudoers.d/90-vpssetup-sudo
+}
+
+legacy_sudo_timeout_path() {
+    system_path /etc/sudoers.d/90-vpssetup-timeout
+}
+
+sudo_policy_is_applied() {
+    local mode="$1"
+    local target legacy
+    target="$(sudo_policy_path)"
+    legacy="$(legacy_sudo_timeout_path)"
+    [[ ! -e "$legacy" ]] || return 1
+
+    case "$mode" in
+        standard) [[ ! -e "$target" ]] ;;
+        timeout)
+            [[ -r "$target" ]] &&
+                grep -Fqx "Defaults:${ADMIN_USER} timestamp_timeout=60" "$target"
+            ;;
+        nopasswd)
+            [[ -r "$target" ]] &&
+                grep -Fqx "${ADMIN_USER} ALL=(ALL:ALL) NOPASSWD: ALL" "$target"
+            ;;
+        *) return 1 ;;
+    esac
+}
+
+module_sudo_set() {
+    require_root module sudo || return 1
+    local mode="${1:-standard}"
+    case "$mode" in
+        standard|timeout|nopasswd) ;;
+        *) die "Режим sudo: standard, timeout или nopasswd"; return 1 ;;
+    esac
+
+    local target legacy
+    target="$(sudo_policy_path)"
+    legacy="$(legacy_sudo_timeout_path)"
+    if [[ "$mode" == "$SUDO_MODE" ]] && sudo_policy_is_applied "$mode"; then
+        log_info "Выбранный режим sudo уже активен"
+        return 0
+    fi
+
+    backup_create "pre-module-sudo-${mode}" || return 1
+
+    if [[ "$mode" == "standard" ]]; then
+        rm -f "$target" "$legacy"
+    else
+        local content dir tmp
+        if [[ "$mode" == "timeout" ]]; then
+            content="# Managed by VPSSetup
+Defaults:${ADMIN_USER} timestamp_timeout=60
 "
-    backup_create "pre-module-sudo-timeout" || return 1
-    atomic_write "$target" 440 "$content" || return 1
-    if ! is_test_mode; then
-        visudo -cf "$target" >/dev/null || {
-            rm -f "$target"
+        else
+            content="# Managed by VPSSetup
+${ADMIN_USER} ALL=(ALL:ALL) NOPASSWD: ALL
+"
+        fi
+
+        dir="$(dirname "$target")"
+        mkdir -p "$dir"
+        tmp="$(mktemp "$dir/.vpssetup-sudo.XXXXXX")" || return 1
+        printf '%s' "$content" >"$tmp"
+        chmod 440 "$tmp"
+        if ! is_test_mode && ! visudo -cf "$tmp" >/dev/null; then
+            rm -f "$tmp"
             die "sudoers drop-in не прошёл visudo"
             return 1
-        }
+        fi
+        mv -f "$tmp" "$target"
+        rm -f "$legacy"
     fi
-    SUDO_TIMEOUT_ENABLED="true"
+
+    SUDO_MODE="$mode"
     save_state
-    log_success "sudo timestamp_timeout=60"
+    case "$mode" in
+        standard) log_success "sudo: стандартный запрос пароля" ;;
+        timeout) log_success "sudo: пароль действует 60 минут" ;;
+        nopasswd) log_success "sudo: NOPASSWD включён для $ADMIN_USER" ;;
+    esac
+}
+
+module_sudo_timeout_enable() {
+    module_sudo_set timeout
 }
 
 module_sudo_timeout_disable() {
-    require_root module sudo-timeout disable || return 1
-    rm -f "$(system_path /etc/sudoers.d/90-vpssetup-timeout)"
-    SUDO_TIMEOUT_ENABLED="false"
-    save_state
-    log_success "sudo timeout drop-in удалён"
+    module_sudo_set standard
 }
 
 module_docker_group_enable() {
@@ -258,7 +321,7 @@ module_docker_group_disable() {
 module_list() {
     printf '  %-18s %s\n' "swap" "${MANAGED_SWAPFILE:-off}"
     printf '  %-18s %s\n' "ipv6" "${IPV6_METHOD:-off}"
-    printf '  %-18s %s\n' "sudo-timeout" "$SUDO_TIMEOUT_ENABLED"
+    printf '  %-18s %s\n' "sudo" "$SUDO_MODE"
     printf '  %-18s %s\n' "docker-group" "$DOCKER_GROUP_ADDED"
 }
 
@@ -273,6 +336,7 @@ module_dispatch() {
             case "$name" in
                 swap) module_swap_enable "${1:-2G}" ;;
                 ipv6) module_ipv6_enable "${1:-sysctl}" ;;
+                sudo) module_sudo_set "${1:-timeout}" ;;
                 sudo-timeout) module_sudo_timeout_enable ;;
                 docker-group) module_docker_group_enable ;;
                 *) die "Неизвестный модуль: $name"; return 1 ;;
@@ -282,6 +346,7 @@ module_dispatch() {
             case "$name" in
                 swap) module_swap_disable ;;
                 ipv6) module_ipv6_disable ;;
+                sudo) module_sudo_set standard ;;
                 sudo-timeout) module_sudo_timeout_disable ;;
                 docker-group) module_docker_group_disable ;;
                 *) die "Неизвестный модуль: $name"; return 1 ;;

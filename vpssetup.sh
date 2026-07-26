@@ -74,7 +74,7 @@ Usage:
   vpssetup version
   vpssetup help
 
-Modules: swap, ipv6, sudo-timeout, docker-group
+Modules: swap, ipv6, sudo (timeout|nopasswd), docker-group
 EOF
 }
 

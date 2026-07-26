@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-STATE_SCHEMA=1
+STATE_SCHEMA=2
 PHASE="unconfigured"
 ADMIN_USER="deploy"
 SSH_OLD_PORT="22"
@@ -18,6 +18,8 @@ REBOOT_BOOT_ID=""
 MANAGED_SWAPFILE=""
 IPV6_METHOD=""
 IPV6_UFW_PREVIOUS=""
+SUDO_MODE="standard"
+# Legacy state key, read only for migration from schema 1.
 SUDO_TIMEOUT_ENABLED="false"
 DOCKER_GROUP_ADDED="false"
 
@@ -28,7 +30,7 @@ state_allowed_key() {
         UFW_HTTPS_RULE_OWNED|INITIAL_BACKUP_ID|LAST_BACKUP_ID|REBOOT_REQUIRED|\
         REBOOT_BOOT_ID|\
         MANAGED_SWAPFILE|IPV6_METHOD|IPV6_UFW_PREVIOUS|\
-        SUDO_TIMEOUT_ENABLED|DOCKER_GROUP_ADDED)
+        SUDO_MODE|SUDO_TIMEOUT_ENABLED|DOCKER_GROUP_ADDED)
             return 0
             ;;
     esac
@@ -38,13 +40,14 @@ state_allowed_key() {
 load_state() {
     [[ -r "$STATE_FILE" ]] || return 0
 
-    local line key value
+    local line key value saw_sudo_mode="false"
     while IFS= read -r line || [[ -n "$line" ]]; do
         [[ "$line" =~ ^[[:space:]]*(#|$) ]] && continue
         [[ "$line" =~ ^([A-Z_][A-Z0-9_]*)=\'([^\']*)\'$ ]] || continue
         key="${BASH_REMATCH[1]}"
         value="${BASH_REMATCH[2]}"
         state_allowed_key "$key" || continue
+        [[ "$key" == "SUDO_MODE" ]] && saw_sudo_mode="true"
         printf -v "$key" '%s' "$value"
     done <"$STATE_FILE"
 
@@ -75,6 +78,17 @@ load_state() {
         [[ "${!boolean_key}" == "true" ]] ||
             printf -v "$boolean_key" '%s' "false"
     done
+    if [[ "$saw_sudo_mode" == "false" ]]; then
+        if [[ "$SUDO_TIMEOUT_ENABLED" == "true" ]]; then
+            SUDO_MODE="timeout"
+        else
+            SUDO_MODE="standard"
+        fi
+    fi
+    case "$SUDO_MODE" in
+        standard|timeout|nopasswd) ;;
+        *) SUDO_MODE="standard" ;;
+    esac
     case "$PHASE" in
         unconfigured|ssh_pending|configured) ;;
         *) PHASE="unconfigured" ;;
@@ -102,7 +116,7 @@ REBOOT_BOOT_ID='${REBOOT_BOOT_ID}'
 MANAGED_SWAPFILE='${MANAGED_SWAPFILE}'
 IPV6_METHOD='${IPV6_METHOD}'
 IPV6_UFW_PREVIOUS='${IPV6_UFW_PREVIOUS}'
-SUDO_TIMEOUT_ENABLED='${SUDO_TIMEOUT_ENABLED}'
+SUDO_MODE='${SUDO_MODE}'
 DOCKER_GROUP_ADDED='${DOCKER_GROUP_ADDED}'
 "
     atomic_write "$STATE_FILE" 600 "$content"

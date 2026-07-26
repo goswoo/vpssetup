@@ -229,11 +229,42 @@ newest_snapshot="$(run_vpssetup backup list | sed -n '1s/^  \([^ ]*\).*/\1/p')"
     fail "snapshot list used directory mtime instead of snapshot timestamp"
 pass "snapshot retention"
 
+sed -i '/^SUDO_MODE=/d' "$TEST_ROOT/var/lib/vpssetup/state.conf"
+printf "SUDO_TIMEOUT_ENABLED='true'\n" \
+    >>"$TEST_ROOT/var/lib/vpssetup/state.conf"
+printf '# Managed by VPSSetup\nDefaults timestamp_timeout=60\n' \
+    >"$TEST_ROOT/etc/sudoers.d/90-vpssetup-timeout"
+run_vpssetup module list >"$TEST_ROOT/sudo-legacy-list.out"
+assert_contains "$TEST_ROOT/sudo-legacy-list.out" 'timeout'
 run_vpssetup module enable sudo-timeout >/dev/null
-assert_contains "$TEST_ROOT/etc/sudoers.d/90-vpssetup-timeout" 'timestamp_timeout=60'
-run_vpssetup module disable sudo-timeout >/dev/null
-[[ ! -e "$TEST_ROOT/etc/sudoers.d/90-vpssetup-timeout" ]] || fail "sudo timeout disable"
-pass "sudo timeout module"
+assert_contains "$TEST_ROOT/etc/sudoers.d/90-vpssetup-sudo" \
+    'Defaults:deploy timestamp_timeout=60'
+[[ ! -e "$TEST_ROOT/etc/sudoers.d/90-vpssetup-timeout" ]] ||
+    fail "legacy sudo timeout was not migrated"
+assert_contains "$TEST_ROOT/var/lib/vpssetup/state.conf" "SUDO_MODE='timeout'"
+run_vpssetup module enable sudo nopasswd >/dev/null
+assert_contains "$TEST_ROOT/etc/sudoers.d/90-vpssetup-sudo" \
+    'deploy ALL=(ALL:ALL) NOPASSWD: ALL'
+assert_not_contains "$TEST_ROOT/etc/sudoers.d/90-vpssetup-sudo" \
+    'timestamp_timeout'
+assert_contains "$TEST_ROOT/var/lib/vpssetup/state.conf" "SUDO_MODE='nopasswd'"
+run_vpssetup module disable sudo >/dev/null
+[[ ! -e "$TEST_ROOT/etc/sudoers.d/90-vpssetup-sudo" ]] ||
+    fail "sudo policy disable"
+[[ ! -e "$TEST_ROOT/etc/sudoers.d/90-vpssetup-timeout" ]] ||
+    fail "legacy sudo timeout was not removed"
+assert_contains "$TEST_ROOT/var/lib/vpssetup/state.conf" "SUDO_MODE='standard'"
+pass "sudo policy modes"
+
+printf '4\n3\n3\ny\n0\n0\n' |
+    run_vpssetup >"$TEST_ROOT/sudo-tui.out"
+assert_contains "$TEST_ROOT/sudo-tui.out" \
+    'NOPASSWD — выполнять sudo без пароля'
+assert_contains "$TEST_ROOT/sudo-tui.out" \
+    'сможет выполнять любые команды через sudo без пароля'
+assert_contains "$TEST_ROOT/var/lib/vpssetup/state.conf" "SUDO_MODE='nopasswd'"
+run_vpssetup module disable sudo >/dev/null
+pass "sudo policy TUI"
 
 run_vpssetup module enable swap 2G >/dev/null
 assert_file "$TEST_ROOT/swapfile"
