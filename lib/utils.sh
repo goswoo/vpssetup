@@ -45,6 +45,22 @@ is_test_mode() {
     [[ "${VPSSETUP_TEST_MODE:-0}" == "1" ]]
 }
 
+current_boot_id() {
+    local boot_id_file
+    boot_id_file="$(system_path /proc/sys/kernel/random/boot_id)"
+    if [[ -r "$boot_id_file" ]]; then
+        sed -n '1p' "$boot_id_file"
+    elif [[ -r /proc/sys/kernel/random/boot_id ]]; then
+        sed -n '1p' /proc/sys/kernel/random/boot_id
+    fi
+}
+
+mark_reboot_required() {
+    REBOOT_REQUIRED="true"
+    REBOOT_BOOT_ID="$(current_boot_id)"
+    save_state
+}
+
 require_root() {
     if ! is_test_mode && [[ "$(id -u)" -ne 0 ]]; then
         die "Команда требует root. Запустите: sudo vpssetup $*"

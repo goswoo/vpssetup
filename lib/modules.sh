@@ -140,7 +140,7 @@ net.ipv6.conf.default.disable_ipv6 = 1
 GRUB_CMDLINE_LINUX_DEFAULT="${GRUB_CMDLINE_LINUX_DEFAULT} ipv6.disable=1"
 ' || return 1
         is_test_mode || update-grub || return 1
-        REBOOT_REQUIRED="true"
+        mark_reboot_required
     fi
 
     set_ufw_ipv6_value no

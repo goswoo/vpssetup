@@ -35,8 +35,7 @@ install_base_packages() {
     log_success "Пакеты готовы"
 
     if [[ -e /var/run/reboot-required ]]; then
-        REBOOT_REQUIRED="true"
-        save_state
+        mark_reboot_required
         log_warn "После обновлений требуется reboot; vpssetup не выполнит его автоматически"
     fi
 }

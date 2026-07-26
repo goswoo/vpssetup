@@ -274,4 +274,11 @@ run_vpssetup health >/dev/null || health_rc=$?
 [[ "$health_rc" -eq 2 ]] || fail "health warning exit code"
 pass "configured sandbox health with reboot warning"
 
+rm -f "$TEST_ROOT/var/run/reboot-required"
+printf "REBOOT_REQUIRED='true'\n" >>"$TEST_ROOT/var/lib/vpssetup/state.conf"
+printf "REBOOT_BOOT_ID='00000000-0000-0000-0000-000000000000'\n" \
+    >>"$TEST_ROOT/var/lib/vpssetup/state.conf"
+run_vpssetup health >/dev/null || fail "stale reboot warning after boot"
+pass "reboot warning clears after boot changes"
+
 printf '1..%d\n' "$pass_count"

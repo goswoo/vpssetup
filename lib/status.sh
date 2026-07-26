@@ -9,8 +9,9 @@ ssh_listener_status() {
 }
 
 reboot_required_now() {
-    [[ "$REBOOT_REQUIRED" == "true" ]] ||
-        [[ -e "$(system_path /var/run/reboot-required)" ]]
+    [[ -e "$(system_path /var/run/reboot-required)" ]] && return 0
+    [[ "$REBOOT_REQUIRED" == "true" && -n "$REBOOT_BOOT_ID" ]] || return 1
+    [[ "$REBOOT_BOOT_ID" == "$(current_boot_id)" ]]
 }
 
 status_has_drift() {
