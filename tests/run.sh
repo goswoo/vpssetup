@@ -55,6 +55,23 @@ VPSSETUP_ROOT="$INSTALL_ROOT" VPSSETUP_TEST_MODE=1 \
 rm -rf "$INSTALL_ROOT"
 pass "local installer and symlink execution"
 
+REMOTE_INSTALL_ROOT="$(mktemp -d)"
+REMOTE_INSTALLER_DIR="$(mktemp -d)"
+mkdir -p "$REMOTE_INSTALL_ROOT/etc"
+printf 'ID=ubuntu\nVERSION_ID="24.04"\n' >"$REMOTE_INSTALL_ROOT/etc/os-release"
+cp "$PROJECT_DIR/install.sh" "$REMOTE_INSTALLER_DIR/install.sh"
+VPSSETUP_ROOT="$REMOTE_INSTALL_ROOT" VPSSETUP_TEST_MODE=1 \
+    VPSSETUP_RAW_BASE_URL="file://$PROJECT_DIR" \
+    bash "$REMOTE_INSTALLER_DIR/install.sh" --no-setup >/dev/null
+assert_file "$REMOTE_INSTALL_ROOT/opt/vpssetup/vpssetup.sh"
+assert_file "$REMOTE_INSTALL_ROOT/opt/vpssetup/lib/manager.sh"
+VPSSETUP_ROOT="$REMOTE_INSTALL_ROOT" VPSSETUP_TEST_MODE=1 \
+    VPSSETUP_RAW_BASE_URL="file://$PROJECT_DIR" \
+    "$REMOTE_INSTALL_ROOT/usr/local/bin/vpssetup" update >/dev/null
+assert_file "$REMOTE_INSTALL_ROOT/opt"/vpssetup.previous.*/vpssetup.sh
+rm -rf "$REMOTE_INSTALL_ROOT" "$REMOTE_INSTALLER_DIR"
+pass "remote-style install and update download source files"
+
 WIZARD_ROOT="$(mktemp -d)"
 mkdir -p \
     "$WIZARD_ROOT/etc/ssh/sshd_config.d" \
@@ -71,10 +88,13 @@ cat >"$WIZARD_ROOT/etc/ufw/before.rules" <<'EOF'
 -A ufw-before-input -p icmp --icmp-type echo-request -j ACCEPT
 COMMIT
 EOF
-printf 'y\n\n\n\n\n\n\n\nssh-ed25519 AAAATEST wizard@test\n' |
+printf 'y\n\n54222\n\n\n\n\n\nssh-ed25519 AAAATEST wizard@test\n' |
     VPSSETUP_ROOT="$WIZARD_ROOT" VPSSETUP_TEST_MODE=1 \
         VPSSETUP_INSTALL_DIR="$PROJECT_DIR" NO_COLOR=1 \
-        bash "$PROJECT_DIR/vpssetup.sh" setup >/dev/null 2>&1
+        bash "$PROJECT_DIR/vpssetup.sh" setup >"$WIZARD_ROOT/wizard.out" 2>&1
+assert_contains "$WIZARD_ROOT/wizard.out" 'ssh-keygen -t ed25519'
+assert_contains "$WIZARD_ROOT/wizard.out" 'Windows PowerShell'
+assert_contains "$WIZARD_ROOT/wizard.out" 'Приватный файл id_ed25519'
 assert_contains "$WIZARD_ROOT/var/lib/vpssetup/state.conf" "PHASE='ssh_pending'"
 assert_file "$WIZARD_ROOT/home/deploy/.ssh/authorized_keys"
 VPSSETUP_ROOT="$WIZARD_ROOT" VPSSETUP_TEST_MODE=1 \
@@ -108,6 +128,11 @@ EOF
 [[ "$(run_vpssetup version)" == "VPSSetup v0.1.0" ]] || fail "version"
 run_vpssetup help | grep -q 'ssh confirm' || fail "help"
 pass "version and help"
+
+if run_vpssetup ssh stage </dev/null >/dev/null 2>&1; then
+    fail "SSH stage accepted missing port"
+fi
+pass "SSH port is required"
 
 run_vpssetup backup create initial >/dev/null
 assert_file "$TEST_ROOT/var/lib/vpssetup/state.conf"
@@ -167,10 +192,10 @@ run_vpssetup module disable icmp-rate-limit >/dev/null
 assert_not_contains "$TEST_ROOT/etc/ufw/before.rules" '# vpssetup:icmp-rate-limit begin'
 pass "ICMP module placement and removal"
 
-run_vpssetup ssh stage 60600 >/dev/null
+run_vpssetup ssh stage 55222 >/dev/null
 assert_contains "$TEST_ROOT/etc/ssh/sshd_config.d/00-vpssetup.conf" 'Port 22'
-assert_contains "$TEST_ROOT/etc/ssh/sshd_config.d/00-vpssetup.conf" 'Port 60600'
-assert_contains "$TEST_ROOT/etc/fail2ban/jail.d/10-vpssetup-sshd.local" 'port = 22,60600'
+assert_contains "$TEST_ROOT/etc/ssh/sshd_config.d/00-vpssetup.conf" 'Port 55222'
+assert_contains "$TEST_ROOT/etc/fail2ban/jail.d/10-vpssetup-sshd.local" 'port = 22,55222'
 assert_contains "$TEST_ROOT/var/lib/vpssetup/state.conf" "PHASE='ssh_pending'"
 pass "two-port SSH stage"
 
@@ -178,23 +203,23 @@ run_vpssetup ssh confirm >/dev/null
 assert_contains "$TEST_ROOT/etc/ssh/sshd_config.d/00-vpssetup.conf" 'PermitRootLogin no'
 assert_contains "$TEST_ROOT/etc/ssh/sshd_config.d/00-vpssetup.conf" 'PasswordAuthentication no'
 assert_not_contains "$TEST_ROOT/etc/ssh/sshd_config.d/00-vpssetup.conf" 'Port 22'
-assert_contains "$TEST_ROOT/etc/fail2ban/jail.d/10-vpssetup-sshd.local" 'port = 60600'
+assert_contains "$TEST_ROOT/etc/fail2ban/jail.d/10-vpssetup-sshd.local" 'port = 55222'
 assert_contains "$TEST_ROOT/var/lib/vpssetup/state.conf" "PHASE='configured'"
 pass "SSH confirmation hardening"
 
-run_vpssetup ssh stage 60600 >/dev/null
+run_vpssetup ssh stage 55222 >/dev/null
 assert_contains "$TEST_ROOT/etc/ssh/sshd_config.d/00-vpssetup.conf" 'PermitRootLogin no'
 assert_contains "$TEST_ROOT/var/lib/vpssetup/state.conf" "PHASE='configured'"
 pass "same-port SSH restage is a no-op"
 
-SSH_CONNECTION='192.0.2.10 50000 192.0.2.20 60600' \
-    run_vpssetup ssh stage 60601 >/dev/null
-assert_contains "$TEST_ROOT/etc/ssh/sshd_config.d/00-vpssetup.conf" 'Port 60600'
-assert_contains "$TEST_ROOT/etc/ssh/sshd_config.d/00-vpssetup.conf" 'Port 60601'
+SSH_CONNECTION='192.0.2.10 50000 192.0.2.20 55222' \
+    run_vpssetup ssh stage 55223 >/dev/null
+assert_contains "$TEST_ROOT/etc/ssh/sshd_config.d/00-vpssetup.conf" 'Port 55222'
+assert_contains "$TEST_ROOT/etc/ssh/sshd_config.d/00-vpssetup.conf" 'Port 55223'
 assert_contains "$TEST_ROOT/etc/ssh/sshd_config.d/00-vpssetup.conf" 'PasswordAuthentication no'
 run_vpssetup ssh confirm >/dev/null
-assert_not_contains "$TEST_ROOT/etc/ssh/sshd_config.d/00-vpssetup.conf" 'Port 60600'
-assert_contains "$TEST_ROOT/etc/ssh/sshd_config.d/00-vpssetup.conf" 'Port 60601'
+assert_not_contains "$TEST_ROOT/etc/ssh/sshd_config.d/00-vpssetup.conf" 'Port 55222'
+assert_contains "$TEST_ROOT/etc/ssh/sshd_config.d/00-vpssetup.conf" 'Port 55223'
 pass "port migration preserves hardening"
 
 run_vpssetup status --json >"$TEST_ROOT/status.json"

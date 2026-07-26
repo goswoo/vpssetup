@@ -34,7 +34,10 @@ tui_ssh_menu() {
         case "$(read_choice "Выбор" "0")" in
             1)
                 local port
-                port="$(read_choice "Новый SSH-порт" "$SSH_PORT")"
+                port="$(read_required_port "Новый SSH-порт")" || {
+                    press_any_key
+                    continue
+                }
                 with_manager_lock ssh_stage "$port"
                 press_any_key
                 ;;

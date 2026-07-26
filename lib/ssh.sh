@@ -97,7 +97,7 @@ ensure_ssh_listener() {
 
 ssh_stage() {
     require_root ssh stage || return 1
-    local target_port="${1:-$SSH_PORT}"
+    local target_port="${1:-}"
     validate_port "$target_port" || {
         die "Некорректный SSH-порт: $target_port"
         return 1

@@ -153,10 +153,30 @@ install_admin_public_key() {
     log_success "SSH-ключ установлен для $ADMIN_USER"
 }
 
+show_client_key_manual() {
+    cat <<'EOF'
+
+  Как создать SSH-ключ на своём компьютере
+
+  Linux / macOS:
+    ssh-keygen -t ed25519
+    cat ~/.ssh/id_ed25519.pub
+
+  Windows PowerShell:
+    ssh-keygen -t ed25519
+    Get-Content $env:USERPROFILE\.ssh\id_ed25519.pub
+
+  При создании нажмите Enter, чтобы сохранить ключ в стандартный путь.
+  Скопируйте сюда всю строку из файла .pub, начинающуюся с ssh-ed25519.
+  Приватный файл id_ed25519 никому не отправляйте.
+EOF
+}
+
 select_or_read_public_key() {
     local root_keys
     root_keys="$(system_path /root/.ssh/authorized_keys)"
     local mode
+    show_client_key_manual
     echo ""
     echo "  [1] Вставить публичный ключ"
     if [[ -r "$root_keys" ]]; then

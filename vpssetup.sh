@@ -21,15 +21,12 @@ else
 fi
 
 if [[ -n "${VPSSETUP_ROOT:-}" ]]; then
-    ETC_DIR="${VPSSETUP_ROOT%/}/etc/vpssetup"
     STATE_DIR="${VPSSETUP_ROOT%/}/var/lib/vpssetup"
     LOG_DIR="${VPSSETUP_ROOT%/}/var/log/vpssetup"
 else
-    ETC_DIR="/etc/vpssetup"
     STATE_DIR="/var/lib/vpssetup"
     LOG_DIR="/var/log/vpssetup"
 fi
-CONFIG_FILE="$ETC_DIR/config.conf"
 STATE_FILE="$STATE_DIR/state.conf"
 BACKUP_DIR="$STATE_DIR/backups"
 LOG_FILE="$LOG_DIR/vpssetup.log"
@@ -46,12 +43,10 @@ done
 
 initialize_runtime() {
     if [[ "$(id -u)" -eq 0 ]] || is_test_mode; then
-        mkdir -p "$ETC_DIR" "$STATE_DIR" "$BACKUP_DIR" "$LOG_DIR"
-        chmod 700 "$ETC_DIR" "$STATE_DIR" "$BACKUP_DIR"
-        write_default_config
+        mkdir -p "$STATE_DIR" "$BACKUP_DIR" "$LOG_DIR"
+        chmod 700 "$STATE_DIR" "$BACKUP_DIR"
     fi
     load_state
-    load_config
 }
 
 show_help() {
@@ -64,7 +59,7 @@ Usage:
   sudo vpssetup status [--json]         Current state
   sudo vpssetup health                  Live diagnostics
   sudo vpssetup logs                    Manager log
-  sudo vpssetup ssh stage [port]
+  sudo vpssetup ssh stage <port>
   sudo vpssetup ssh confirm [--force-console]
   sudo vpssetup ssh status
   sudo vpssetup module list
@@ -97,7 +92,18 @@ dispatch_ssh() {
     local action="${1:-status}"
     shift 2>/dev/null || true
     case "$action" in
-        stage) with_manager_lock ssh_stage "${1:-$SSH_PORT}" ;;
+        stage)
+            local target_port="${1:-}"
+            if [[ -z "$target_port" ]]; then
+                if [[ -t 0 ]]; then
+                    target_port="$(read_required_port "Новый SSH-порт")" || return 1
+                else
+                    die "Укажите SSH-порт: sudo vpssetup ssh stage <port>"
+                    return 1
+                fi
+            fi
+            with_manager_lock ssh_stage "$target_port"
+            ;;
         confirm) with_manager_lock ssh_confirm "${1:-}" ;;
         status) ssh_status ;;
         *) die "Использование: vpssetup ssh stage|confirm|status"; return 1 ;;

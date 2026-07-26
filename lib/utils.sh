@@ -82,6 +82,23 @@ validate_port() {
         ((port >= 1 && port <= 65535))
 }
 
+read_required_port() {
+    local prompt="${1:-SSH-порт}"
+    local answer=""
+    while true; do
+        printf '  %s%s%s: ' "$C_BOLD" "$prompt" "$C_RESET" >&2
+        if ! IFS= read -r answer; then
+            die "SSH-порт обязателен"
+            return 1
+        fi
+        if validate_port "$answer"; then
+            printf '%s\n' "$answer"
+            return 0
+        fi
+        log_error "Введите порт от 1 до 65535"
+    done
+}
+
 validate_username() {
     local username="${1:-}"
     [[ "$username" =~ ^[a-z_][a-z0-9_-]{0,30}$ ]] &&
@@ -90,10 +107,6 @@ validate_username() {
 
 validate_swap_size() {
     [[ "${1:-}" =~ ^[1-9][0-9]*([MmGg])$ ]]
-}
-
-validate_repo_slug() {
-    [[ "${1:-}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
 }
 
 read_choice() {
@@ -136,6 +149,19 @@ atomic_write() {
 
 command_exists() {
     command -v "$1" >/dev/null 2>&1
+}
+
+download_url() {
+    local url="$1"
+    local destination="$2"
+    if command_exists curl; then
+        curl -fsSL --retry 3 --connect-timeout 10 "$url" -o "$destination"
+    elif command_exists wget; then
+        wget -q --timeout=30 --tries=3 -O "$destination" "$url"
+    else
+        die "Нужен curl или wget"
+        return 1
+    fi
 }
 
 run_systemctl() {
@@ -207,16 +233,4 @@ with_manager_lock() {
         return 1
     fi
     "$@"
-}
-
-tar_archive_has_safe_paths() {
-    local archive="$1"
-    local entry
-    while IFS= read -r entry; do
-        case "$entry" in
-            /*|../*|*/../*|*/..)
-                return 1
-                ;;
-        esac
-    done < <(tar -tzf "$archive")
 }

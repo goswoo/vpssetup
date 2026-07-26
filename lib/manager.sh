@@ -1,32 +1,5 @@
 #!/usr/bin/env bash
 
-load_config() {
-    [[ -r "$CONFIG_FILE" ]] || return 0
-    local line key value
-    while IFS= read -r line || [[ -n "$line" ]]; do
-        [[ "$line" =~ ^[[:space:]]*(#|$) ]] && continue
-        [[ "$line" =~ ^([A-Z_][A-Z0-9_]*)=\'([^\']*)\'$ ]] || continue
-        key="${BASH_REMATCH[1]}"
-        value="${BASH_REMATCH[2]}"
-        case "$key" in
-            RELEASE_REPO)
-                if validate_repo_slug "$value"; then
-                    RELEASE_REPO="$value"
-                fi
-                ;;
-        esac
-    done <"$CONFIG_FILE"
-}
-
-write_default_config() {
-    [[ -e "$CONFIG_FILE" ]] && return 0
-    atomic_write "$CONFIG_FILE" 600 \
-        "# VPSSetup release configuration
-# Set to owner/repository after publishing GitHub Releases.
-RELEASE_REPO=''
-"
-}
-
 prompt_setup_values() {
     local username port timezone locale
     username="$(read_choice "Административный пользователь" "$ADMIN_USER")"
@@ -34,11 +7,7 @@ prompt_setup_values() {
         die "Некорректное имя пользователя"
         return 1
     }
-    port="$(read_choice "Новый SSH-порт" "$SSH_PORT")"
-    validate_port "$port" || {
-        die "Некорректный SSH-порт"
-        return 1
-    }
+    port="$(read_required_port "Новый SSH-порт")" || return 1
     timezone="$(read_choice "Timezone" "Europe/Moscow")"
     locale="$(read_choice "LC_TIME" "en_GB.UTF-8")"
 
@@ -123,8 +92,6 @@ manager_uninstall() {
     else
         rm -f "$STATE_FILE" "$STATE_DIR/manager.lock"
     fi
-    rm -rf "$ETC_DIR"
-
     if [[ "$INSTALL_DIR" == /opt/vpssetup ||
         "$INSTALL_DIR" == "$(system_path /opt/vpssetup)" ]]; then
         rm -rf "$INSTALL_DIR"

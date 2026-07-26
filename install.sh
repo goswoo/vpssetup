@@ -5,25 +5,28 @@ set -euo pipefail
 SYSTEM_ROOT="${VPSSETUP_ROOT:-}"
 INSTALL_DIR="${SYSTEM_ROOT%/}/opt/vpssetup"
 BIN_PATH="${SYSTEM_ROOT%/}/usr/local/bin/vpssetup"
-ETC_DIR="${SYSTEM_ROOT%/}/etc/vpssetup"
-REPO="${VPSSETUP_REPO:-}"
-REQUESTED_VERSION="${VPSSETUP_VERSION:-latest}"
+REPO="${VPSSETUP_REPO:-goswoo/vpssetup}"
+RAW_BASE_URL="${VPSSETUP_RAW_BASE_URL:-https://raw.githubusercontent.com/${REPO}/main}"
+LIBRARIES=(
+    colors utils state backup system firewall fail2ban ssh modules update status
+    manager tui
+)
 
 die() {
     printf 'VPSSetup installer: %s\n' "$*" >&2
     exit 1
 }
 
-archive_has_safe_paths() {
-    local archive="$1"
-    local entry
-    while IFS= read -r entry; do
-        case "$entry" in
-            /*|../*|*/../*|*/..)
-                return 1
-                ;;
-        esac
-    done < <(tar -tzf "$archive")
+download_file() {
+    local url="$1"
+    local destination="$2"
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL --retry 3 --connect-timeout 10 "$url" -o "$destination"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q --timeout=30 --tries=3 -O "$destination" "$url"
+    else
+        die "нужен curl или wget"
+    fi
 }
 
 if [[ "${VPSSETUP_TEST_MODE:-0}" != "1" && "$(id -u)" -ne 0 ]]; then
@@ -46,38 +49,18 @@ if [[ -f "$SCRIPT_DIR/vpssetup.sh" && -d "$SCRIPT_DIR/lib" ]]; then
     SOURCE_DIR="$SCRIPT_DIR"
 else
     [[ "$REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] ||
-        die "для remote install задайте VPSSETUP_REPO=owner/repository"
-    command -v curl >/dev/null || die "curl не установлен"
-    command -v sha256sum >/dev/null || die "sha256sum не найден"
-
-    if [[ "$REQUESTED_VERSION" == "latest" ]]; then
-        base_url="https://github.com/${REPO}/releases/latest/download"
-    else
-        [[ "$REQUESTED_VERSION" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
-            die "некорректная версия: $REQUESTED_VERSION"
-        base_url="https://github.com/${REPO}/releases/download/${REQUESTED_VERSION}"
-    fi
-
-    archive="$TEMP_DIR/vpssetup.tar.gz"
-    curl -fsSL --retry 5 --retry-all-errors --max-time 90 \
-        "$base_url/vpssetup.tar.gz" -o "$archive"
-    expected="$(curl -fsSL --retry 5 --retry-all-errors --max-time 45 \
-        "$base_url/vpssetup.tar.gz.sha256" | awk '{print $1; exit}')"
-    actual="$(sha256sum "$archive" | awk '{print $1}')"
-    [[ "$expected" =~ ^[a-fA-F0-9]{64}$ && "$expected" == "$actual" ]] ||
-        die "SHA-256 archive не совпал"
-    archive_has_safe_paths "$archive" ||
-        die "release archive содержит небезопасные пути"
-
-    mkdir -p "$TEMP_DIR/source"
-    tar -xzf "$archive" -C "$TEMP_DIR/source"
-    SOURCE_DIR="$(find "$TEMP_DIR/source" -type f -name vpssetup.sh -printf '%h\n' | head -n1)"
-    [[ -n "$SOURCE_DIR" && -d "$SOURCE_DIR/lib" ]] ||
-        die "release archive имеет неверную структуру"
+        die "некорректный GitHub repository: $REPO"
+    SOURCE_DIR="$TEMP_DIR/source"
+    mkdir -p "$SOURCE_DIR/lib"
+    download_file "$RAW_BASE_URL/vpssetup.sh" "$SOURCE_DIR/vpssetup.sh"
+    download_file "$RAW_BASE_URL/version" "$SOURCE_DIR/version"
+    for library in "${LIBRARIES[@]}"; do
+        download_file "$RAW_BASE_URL/lib/${library}.sh" \
+            "$SOURCE_DIR/lib/${library}.sh"
+    done
 fi
 
-for script in "$SOURCE_DIR/vpssetup.sh" "$SOURCE_DIR/install.sh" "$SOURCE_DIR"/lib/*.sh; do
-    [[ -f "$script" ]] || continue
+for script in "$SOURCE_DIR/vpssetup.sh" "$SOURCE_DIR"/lib/*.sh; do
     bash -n "$script" || die "синтаксическая ошибка: $script"
 done
 
@@ -100,16 +83,6 @@ if ! mv "$staging" "$INSTALL_DIR"; then
 fi
 mkdir -p "$(dirname "$BIN_PATH")"
 ln -sfn "$INSTALL_DIR/vpssetup.sh" "$BIN_PATH"
-
-mkdir -p "$ETC_DIR"
-chmod 700 "$ETC_DIR"
-if [[ ! -f "$ETC_DIR/config.conf" ]]; then
-    {
-        printf '# VPSSetup release configuration\n'
-        printf "RELEASE_REPO='%s'\n" "$REPO"
-    } >"$ETC_DIR/config.conf"
-    chmod 600 "$ETC_DIR/config.conf"
-fi
 
 printf '\n  ✓ VPSSetup установлен\n'
 printf '  Команда: sudo vpssetup\n'

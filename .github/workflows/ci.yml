@@ -17,9 +17,6 @@ jobs:
       - name: Bash syntax
         run: find . -type f -name '*.sh' -not -path './dist/*' -exec bash -n {} \;
       - name: ShellCheck
-        run: shellcheck vpssetup.sh install.sh lib/*.sh scripts/*.sh tests/*.sh
+        run: shellcheck vpssetup.sh install.sh lib/*.sh tests/*.sh
       - name: Sandbox functional tests
         run: bash tests/run.sh
-      - name: Build release archive
-        run: bash scripts/build-release.sh
-
