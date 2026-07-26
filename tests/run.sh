@@ -117,6 +117,7 @@ assert_contains "$WIZARD_ROOT/wizard.out" 'ssh-keygen -t ed25519'
 assert_contains "$WIZARD_ROOT/wizard.out" 'Windows PowerShell'
 assert_contains "$WIZARD_ROOT/wizard.out" 'Приватный файл id_ed25519'
 assert_contains "$WIZARD_ROOT/var/lib/vpssetup/state.conf" "PHASE='ssh_pending'"
+assert_contains "$WIZARD_ROOT/var/lib/vpssetup/state.conf" "UFW_WAS_ACTIVE='false'"
 assert_file "$WIZARD_ROOT/home/deploy/.ssh/authorized_keys"
 [[ -d "$WIZARD_ROOT/run/sshd" ]] || fail "sshd runtime directory"
 VPSSETUP_ROOT="$WIZARD_ROOT" VPSSETUP_TEST_MODE=1 \
@@ -256,6 +257,8 @@ assert_contains "$TEST_ROOT/etc/ssh/sshd_config.d/00-vpssetup.conf" 'PermitRootL
 assert_contains "$TEST_ROOT/var/lib/vpssetup/state.conf" "PHASE='configured'"
 pass "same-port SSH restage is a no-op"
 
+sed -i "s/^UFW_WAS_ACTIVE=.*/UFW_WAS_ACTIVE='false'/" \
+    "$TEST_ROOT/var/lib/vpssetup/state.conf"
 SSH_CONNECTION='192.0.2.10 50000 192.0.2.20 55222' \
     run_vpssetup ssh stage 55223 >/dev/null
 assert_contains "$TEST_ROOT/etc/ssh/sshd_config.d/00-vpssetup.conf" 'Port 55222'
@@ -268,6 +271,7 @@ assert_not_contains "$TEST_ROOT/var/lib/vpssetup-test/ufw-rules" \
     $'55222\tvpssetup:ssh-target'
 assert_contains "$TEST_ROOT/var/lib/vpssetup-test/ufw-rules" \
     $'55223\tvpssetup:ssh-target'
+assert_contains "$TEST_ROOT/var/lib/vpssetup/state.conf" "UFW_WAS_ACTIVE='false'"
 pass "port migration preserves hardening"
 
 run_vpssetup status --json >"$TEST_ROOT/status.json"

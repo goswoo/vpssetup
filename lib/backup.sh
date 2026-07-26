@@ -122,12 +122,6 @@ backup_ufw_state() {
     local saved="$BACKUP_DIR/$id/ufw-state"
     if [[ -r "$saved" ]]; then
         sed -n '1p' "$saved"
-    elif [[ "$id" == "$INITIAL_BACKUP_ID" ]]; then
-        case "$UFW_WAS_ACTIVE" in
-            true) printf 'active\n' ;;
-            false) printf 'inactive\n' ;;
-            *) printf 'preserve\n' ;;
-        esac
     else
         printf 'preserve\n'
     fi
@@ -215,6 +209,10 @@ backup_restore() {
     local safety_id restore_ufw_state safety_ufw_state restoring_initial="false"
     [[ "$id" == "$INITIAL_BACKUP_ID" ]] && restoring_initial="true"
     restore_ufw_state="$(backup_ufw_state "$id")"
+    if [[ "$restoring_initial" == "true" && "$restore_ufw_state" == "preserve" ]]; then
+        die "Initial snapshot старого формата не содержит состояния UFW; rollback остановлен"
+        return 1
+    fi
     backup_create "pre-restore-${id}" || return 1
     safety_id="$LAST_BACKUP_ID"
     safety_ufw_state="$(backup_ufw_state "$safety_id")"

@@ -119,21 +119,24 @@ ufw_prepare_stage() {
     require_root ssh stage || return 1
     local old_port="$1"
     local new_port="$2"
+    local active_before_stage="false"
     command_exists ufw || is_test_mode || {
         die "ufw не установлен"
         return 1
     }
 
     if ufw_is_active; then
-        UFW_WAS_ACTIVE="true"
+        active_before_stage="true"
     else
-        UFW_WAS_ACTIVE="false"
         if is_test_mode; then
             mkdir -p "$(system_path /var/lib/vpssetup-test)"
         else
             ufw default deny incoming || return 1
             ufw default allow outgoing || return 1
         fi
+    fi
+    if [[ "$UFW_WAS_ACTIVE" == "unknown" ]]; then
+        UFW_WAS_ACTIVE="$active_before_stage"
     fi
 
     ufw_add_owned_rule "$old_port" "vpssetup:ssh-stage-old" UFW_OLD_RULE_OWNED || return 1
@@ -144,7 +147,7 @@ ufw_prepare_stage() {
     fi
     ufw_add_owned_rule 443 "vpssetup:https" UFW_HTTPS_RULE_OWNED || return 1
 
-    if [[ "$UFW_WAS_ACTIVE" == "false" ]]; then
+    if [[ "$active_before_stage" == "false" ]]; then
         if is_test_mode; then
             touch "$(system_path /var/lib/vpssetup-test/ufw-active)"
         else
