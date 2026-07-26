@@ -159,6 +159,7 @@ module_ipv6_disable() {
         log_info "IPv6-модуль не включён"
         return 0
     }
+    local method="$IPV6_METHOD"
     backup_create "pre-disable-ipv6" || return 1
     rm -f "$(system_path /etc/sysctl.d/99-vpssetup-disable-ipv6.conf)"
     rm -f "$(system_path /etc/default/grub.d/99-vpssetup-ipv6.cfg)"
@@ -177,16 +178,21 @@ module_ipv6_disable() {
     esac
 
     if ! is_test_mode; then
-        sysctl -w net.ipv6.conf.all.disable_ipv6=0 >/dev/null || true
-        sysctl -w net.ipv6.conf.default.disable_ipv6=0 >/dev/null || true
-        update-grub >/dev/null || true
+        if [[ "$method" == "sysctl" ]]; then
+            sysctl -w net.ipv6.conf.all.disable_ipv6=0 >/dev/null || true
+            sysctl -w net.ipv6.conf.default.disable_ipv6=0 >/dev/null || true
+        else
+            update-grub >/dev/null || true
+        fi
         ufw reload >/dev/null 2>&1 || true
     fi
     IPV6_METHOD=""
     IPV6_UFW_PREVIOUS=""
     save_state
     log_success "Управляемое отключение IPv6 снято"
-    log_warn "Если использовался GRUB, для полного применения нужен reboot"
+    if [[ "$method" == "grub" ]]; then
+        log_warn "Для полного включения IPv6 после GRUB нужен reboot"
+    fi
 }
 
 module_sudo_timeout_enable() {

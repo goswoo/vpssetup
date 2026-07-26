@@ -179,14 +179,16 @@ pass "swap module lifecycle"
 run_vpssetup module enable ipv6 sysctl >/dev/null
 assert_file "$TEST_ROOT/etc/sysctl.d/99-vpssetup-disable-ipv6.conf"
 assert_contains "$TEST_ROOT/etc/default/ufw" 'IPV6=no'
-run_vpssetup module disable ipv6 >/dev/null
+run_vpssetup module disable ipv6 >"$TEST_ROOT/ipv6-sysctl-disable.out"
 assert_contains "$TEST_ROOT/etc/default/ufw" 'IPV6=yes'
+assert_not_contains "$TEST_ROOT/ipv6-sysctl-disable.out" 'reboot'
 pass "IPv6 module lifecycle"
 
 run_vpssetup module enable ipv6 grub >/dev/null
 assert_file "$TEST_ROOT/etc/default/grub.d/99-vpssetup-ipv6.cfg"
 assert_contains "$TEST_ROOT/etc/default/grub.d/99-vpssetup-ipv6.cfg" 'ipv6.disable=1'
-run_vpssetup module disable ipv6 >/dev/null
+run_vpssetup module disable ipv6 >"$TEST_ROOT/ipv6-grub-disable.out"
+assert_contains "$TEST_ROOT/ipv6-grub-disable.out" 'reboot'
 pass "IPv6 GRUB module lifecycle"
 
 run_vpssetup module enable docker-group >/dev/null
