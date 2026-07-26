@@ -53,15 +53,20 @@ backup_create() {
 
     printf '%s\n' "$label" >"$target/label"
     printf '%s\n' "$VERSION" >"$target/version"
+    if ufw_is_active; then
+        printf 'active\n' >"$target/ufw-state"
+    else
+        printf 'inactive\n' >"$target/ufw-state"
+    fi
     if [[ ! -f "$STATE_FILE" ]]; then
         save_state
     fi
-    cp -a "$STATE_FILE" "$target/manager-state.conf"
-    chmod -R go-rwx "$target"
 
     LAST_BACKUP_ID="$id"
     [[ -n "$INITIAL_BACKUP_ID" ]] || INITIAL_BACKUP_ID="$id"
     save_state
+    cp -a "$STATE_FILE" "$target/manager-state.conf"
+    chmod -R go-rwx "$target"
     log_success "Создан snapshot: $id"
 }
 
@@ -110,6 +115,50 @@ backup_restore_files() {
             rm -f "$target"
         fi
     done <"$source/manifest.tsv"
+}
+
+backup_ufw_state() {
+    local id="$1"
+    local saved="$BACKUP_DIR/$id/ufw-state"
+    if [[ -r "$saved" ]]; then
+        sed -n '1p' "$saved"
+    elif [[ "$id" == "$INITIAL_BACKUP_ID" ]]; then
+        case "$UFW_WAS_ACTIVE" in
+            true) printf 'active\n' ;;
+            false) printf 'inactive\n' ;;
+            *) printf 'preserve\n' ;;
+        esac
+    else
+        printf 'preserve\n'
+    fi
+}
+
+backup_apply_ufw_state() {
+    local desired="$1"
+    case "$desired" in
+        preserve) return 0 ;;
+        active|inactive) ;;
+        *) die "Некорректное состояние UFW в snapshot"; return 1 ;;
+    esac
+
+    if is_test_mode; then
+        local marker
+        marker="$(system_path /var/lib/vpssetup-test/ufw-active)"
+        mkdir -p "$(dirname "$marker")"
+        if [[ "$desired" == "active" ]]; then
+            touch "$marker"
+        else
+            rm -f "$marker"
+        fi
+        return 0
+    fi
+
+    command_exists ufw || return 0
+    if [[ "$desired" == "active" ]]; then
+        ufw --force enable >/dev/null
+    else
+        ufw --force disable >/dev/null
+    fi
 }
 
 validate_restored_system_files() {
@@ -163,14 +212,19 @@ backup_restore() {
         }
     fi
 
-    local safety_id
+    local safety_id restore_ufw_state safety_ufw_state
+    restore_ufw_state="$(backup_ufw_state "$id")"
     backup_create "pre-restore-${id}" || return 1
     safety_id="$LAST_BACKUP_ID"
+    safety_ufw_state="$(backup_ufw_state "$safety_id")"
     log_info "Восстановление файлов из $id"
 
-    if ! backup_restore_files "$id" || ! validate_restored_system_files; then
+    if ! backup_restore_files "$id" ||
+        ! validate_restored_system_files ||
+        ! backup_apply_ufw_state "$restore_ufw_state"; then
         log_error "Restore не прошёл проверку; возвращаю состояние $safety_id"
         backup_restore_files "$safety_id" || true
+        backup_apply_ufw_state "$safety_ufw_state" || true
         reload_managed_services || true
         return 1
     fi
@@ -178,6 +232,7 @@ backup_restore() {
     reload_managed_services || {
         log_error "Службы не приняли восстановленную конфигурацию; выполняю safety rollback"
         backup_restore_files "$safety_id" || true
+        backup_apply_ufw_state "$safety_ufw_state" || true
         reload_managed_services || true
         return 1
     }

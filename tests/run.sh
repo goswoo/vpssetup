@@ -159,7 +159,20 @@ pass "SSH port is required"
 run_vpssetup backup create initial >/dev/null
 assert_file "$TEST_ROOT/var/lib/vpssetup/state.conf"
 assert_file "$TEST_ROOT/var/lib/vpssetup/backups/"*/manifest.tsv
+initial_id="$(sed -n "s/^INITIAL_BACKUP_ID='\\([^']*\\)'$/\\1/p" \
+    "$TEST_ROOT/var/lib/vpssetup/state.conf")"
+assert_contains "$TEST_ROOT/var/lib/vpssetup/backups/$initial_id/ufw-state" \
+    'inactive'
+assert_contains "$TEST_ROOT/var/lib/vpssetup/backups/$initial_id/manager-state.conf" \
+    "INITIAL_BACKUP_ID='$initial_id'"
 pass "initial snapshot"
+
+mkdir -p "$TEST_ROOT/var/lib/vpssetup-test"
+touch "$TEST_ROOT/var/lib/vpssetup-test/ufw-active"
+run_vpssetup backup restore "$initial_id" >/dev/null
+[[ ! -e "$TEST_ROOT/var/lib/vpssetup-test/ufw-active" ]] ||
+    fail "snapshot did not restore inactive UFW"
+pass "snapshot restores UFW activation state"
 
 run_vpssetup backup create restore-point >/dev/null
 restore_id="$(sed -n "s/^LAST_BACKUP_ID='\\([^']*\\)'$/\\1/p" \
