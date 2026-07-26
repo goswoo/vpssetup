@@ -175,13 +175,6 @@ ufw_finalize_ssh() {
     log_success "Старое управляемое SSH-правило UFW удалено"
 }
 
-ufw_enable_optional_http() {
-    require_root setup || return 1
-    ufw_add_owned_rule 80 "vpssetup:http" UFW_HTTP_RULE_OWNED || return 1
-    save_state
-    log_success "UFW разрешает optional HTTP 80/tcp"
-}
-
 ufw_status_summary() {
     if ufw_is_active; then
         printf 'active'

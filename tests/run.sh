@@ -110,15 +110,18 @@ cat >"$WIZARD_ROOT/etc/ufw/before.rules" <<'EOF'
 -A ufw-before-input -p icmp --icmp-type echo-request -j ACCEPT
 COMMIT
 EOF
-printf 'y\n\n54222\n\n\n\n\n\nssh-ed25519 AAAATEST wizard@test\n' |
+printf 'y\n\n54222\n\n\n\n\nssh-ed25519 AAAATEST wizard@test\n' |
     VPSSETUP_ROOT="$WIZARD_ROOT" VPSSETUP_TEST_MODE=1 \
         VPSSETUP_INSTALL_DIR="$PROJECT_DIR" NO_COLOR=1 \
         bash "$PROJECT_DIR/vpssetup.sh" setup >"$WIZARD_ROOT/wizard.out" 2>&1
 assert_contains "$WIZARD_ROOT/wizard.out" 'ssh-keygen -t ed25519'
 assert_contains "$WIZARD_ROOT/wizard.out" 'Windows PowerShell'
 assert_contains "$WIZARD_ROOT/wizard.out" 'Приватный файл id_ed25519'
+assert_not_contains "$WIZARD_ROOT/wizard.out" '80/tcp'
 assert_contains "$WIZARD_ROOT/var/lib/vpssetup/state.conf" "PHASE='ssh_pending'"
 assert_contains "$WIZARD_ROOT/var/lib/vpssetup/state.conf" "UFW_WAS_ACTIVE='false'"
+assert_not_contains "$WIZARD_ROOT/var/lib/vpssetup/state.conf" \
+    'UFW_HTTP_RULE_OWNED'
 assert_file "$WIZARD_ROOT/home/deploy/.ssh/authorized_keys"
 [[ -d "$WIZARD_ROOT/run/sshd" ]] || fail "sshd runtime directory"
 VPSSETUP_ROOT="$WIZARD_ROOT" VPSSETUP_TEST_MODE=1 \

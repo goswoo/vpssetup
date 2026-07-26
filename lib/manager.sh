@@ -15,11 +15,6 @@ prompt_setup_values() {
     SETUP_SSH_PORT="$port"
     SETUP_TIMEZONE="$timezone"
     SETUP_LOCALE="$locale"
-    if confirm "Открыть optional HTTP 80/tcp?" "N"; then
-        SETUP_ENABLE_HTTP="true"
-    else
-        SETUP_ENABLE_HTTP="false"
-    fi
 }
 
 run_setup_wizard() {
@@ -63,9 +58,6 @@ run_setup_wizard() {
     install_admin_public_key "$SELECTED_PUBLIC_KEY" || return 1
     configure_unattended_upgrades || return 1
     ssh_stage "$SETUP_SSH_PORT" || return 1
-    if [[ "$SETUP_ENABLE_HTTP" == "true" ]]; then
-        ufw_enable_optional_http || log_warn "Не удалось добавить optional HTTP rule"
-    fi
 
     echo ""
     log_success "Базовая стадия завершена"
