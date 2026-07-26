@@ -73,7 +73,7 @@ Usage:
   vpssetup version
   vpssetup help
 
-Modules: swap, ipv6, sudo-timeout, docker-group, icmp-rate-limit
+Modules: swap, ipv6, sudo-timeout, docker-group
 EOF
 }
 

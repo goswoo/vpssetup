@@ -1,18 +1,9 @@
 #!/usr/bin/env bash
 
 show_banner() {
-    printf '%s' "$C_BRIGHT_CYAN"
-    cat <<'EOF'
-
-  ██╗   ██╗██████╗ ███████╗███████╗███████╗████████╗██╗   ██╗██████╗
-  ██║   ██║██╔══██╗██╔════╝██╔════╝██╔════╝╚══██╔══╝██║   ██║██╔══██╗
-  ██║   ██║██████╔╝███████╗███████╗█████╗     ██║   ██║   ██║██████╔╝
-  ╚██╗ ██╔╝██╔═══╝ ╚════██║╚════██║██╔══╝     ██║   ██║   ██║██╔═══╝
-   ╚████╔╝ ██║     ███████║███████║███████╗   ██║   ╚██████╔╝██║
-    ╚═══╝  ╚═╝     ╚══════╝╚══════╝╚══════╝   ╚═╝    ╚═════╝ ╚═╝
-EOF
-    printf '  %sVPSSetup v%s — Ubuntu 24.04 hardening manager%s\n\n' \
-        "$C_BOLD" "$VERSION" "$C_RESET"
+    printf '\n  %sVPSSetup v%s%s — управление Ubuntu 24.04\n' \
+        "$C_BRIGHT_CYAN$C_BOLD" "$VERSION" "$C_RESET"
+    printf '  %s%s%s\n\n' "$C_DIM" "────────────────────────────────────────────" "$C_RESET"
 }
 
 clear_screen() {
@@ -21,65 +12,240 @@ clear_screen() {
     fi
 }
 
+tui_phase_title() {
+    case "$PHASE" in
+        unconfigured) printf 'НЕ НАСТРОЕН' ;;
+        ssh_pending) printf 'ОЖИДАЕТСЯ ПОДТВЕРЖДЕНИЕ SSH' ;;
+        configured)
+            if port_is_listening "$SSH_PORT"; then
+                printf 'НАСТРОЕН'
+            else
+                printf 'ТРЕБУЕТ ВНИМАНИЯ'
+            fi
+            ;;
+    esac
+}
+
+tui_show_dashboard() {
+    local ssh_value fail2ban_value reboot_value
+    if [[ "$PHASE" == "ssh_pending" ]]; then
+        ssh_value="$SSH_OLD_PORT → $SSH_PORT"
+    else
+        ssh_value="$SSH_PORT"
+    fi
+    if fail2ban_is_healthy; then
+        fail2ban_value="работает"
+    else
+        fail2ban_value="не запущен"
+    fi
+    if reboot_required_now; then
+        reboot_value="требуется"
+    else
+        reboot_value="не требуется"
+    fi
+
+    printf '  Состояние:       %s\n' "$(tui_phase_title)"
+    printf '  Пользователь:    %s\n' "$ADMIN_USER"
+    printf '  SSH:             %s\n' "$ssh_value"
+    printf '  Firewall:        %s\n' "$(ufw_status_summary)"
+    printf '  Fail2ban:        %s\n' "$fail2ban_value"
+    printf '  Перезагрузка:    %s\n' "$reboot_value"
+    echo ""
+
+    printf '  %sСледующий шаг:%s\n' "$C_BOLD" "$C_RESET"
+    case "$PHASE" in
+        unconfigured)
+            echo "  Запустите мастер первоначальной настройки."
+            ;;
+        ssh_pending)
+            printf '  В новом окне подключитесь: ssh -p %s %s@<SERVER>\n' \
+                "$SSH_PORT" "$ADMIN_USER"
+            echo "  Затем подтвердите новый SSH-порт."
+            ;;
+        configured)
+            if port_is_listening "$SSH_PORT"; then
+                echo "  Настройка завершена. Можно запустить диагностику."
+            else
+                printf '  SSH не слушает порт %s. Запустите диагностику.\n' "$SSH_PORT"
+            fi
+            ;;
+    esac
+    echo ""
+}
+
+tui_connection_help() {
+    echo ""
+    printf '  Подключение по SSH:\n\n'
+    printf '    ssh -p %s %s@<SERVER>\n\n' "$SSH_PORT" "$ADMIN_USER"
+    echo "  Выполните команду в новом окне и не закрывайте текущую сессию,"
+    echo "  пока новый вход не будет подтверждён."
+}
+
+tui_ssh_overview() {
+    local root_login password_login
+    if [[ "$SSH_CONFIRMED" == "true" ]]; then
+        root_login="запрещён"
+        password_login="запрещён"
+    else
+        root_login="разрешён до подтверждения"
+        password_login="разрешён до подтверждения"
+    fi
+
+    printf '  Текущий порт:      %s\n' "$SSH_OLD_PORT"
+    if [[ "$PHASE" == "ssh_pending" ]]; then
+        printf '  Новый порт:        %s\n' "$SSH_PORT"
+    else
+        printf '  Активный порт:     %s\n' "$SSH_PORT"
+    fi
+    printf '  Root-вход:         %s\n' "$root_login"
+    printf '  Вход по паролю:    %s\n' "$password_login"
+    printf '  Вход по ключу:     разрешён\n'
+    printf '  UFW:               %s\n' "$(ufw_status_summary)"
+}
+
 tui_ssh_menu() {
     while true; do
         clear_screen
         show_banner
-        ssh_status
+        echo "  SSH И СЕТЕВОЙ ДОСТУП"
         echo ""
-        echo "  [1] Stage SSH"
-        echo "  [2] Confirm SSH"
-        echo "  [3] Health check"
+        tui_ssh_overview
+        echo ""
+
+        if [[ "$PHASE" == "ssh_pending" ]]; then
+            echo "  [1] Подтвердить новый SSH-порт"
+        else
+            echo "  [1] Настроить или сменить SSH-порт"
+        fi
+        echo "  [2] Показать команду подключения"
+        echo "  [3] Как создать SSH-ключ"
+        echo "  [4] Проверить SSH, UFW и Fail2ban"
         echo "  [0] Назад"
+
         case "$(read_choice "Выбор" "0")" in
             1)
-                local port
-                port="$(read_required_port "Новый SSH-порт")" || {
-                    press_any_key
-                    continue
-                }
-                with_manager_lock ssh_stage "$port"
+                if [[ "$PHASE" == "ssh_pending" ]]; then
+                    with_manager_lock ssh_confirm
+                else
+                    local port
+                    port="$(read_required_port "Новый SSH-порт")" || {
+                        press_any_key
+                        continue
+                    }
+                    with_manager_lock ssh_stage "$port"
+                fi
                 press_any_key
                 ;;
-            2) with_manager_lock ssh_confirm; press_any_key ;;
-            3) health_check || true; press_any_key ;;
+            2) tui_connection_help; press_any_key ;;
+            3) show_client_key_manual; press_any_key ;;
+            4) health_check || true; press_any_key ;;
             0) return ;;
         esac
     done
+}
+
+tui_swap_action() {
+    echo ""
+    echo "  Swap помогает серверу с небольшим объёмом RAM."
+    if [[ -n "$MANAGED_SWAPFILE" ]]; then
+        printf '  Сейчас включён: %s\n' "$MANAGED_SWAPFILE"
+        confirm "Отключить управляемый swap?" "N" &&
+            with_manager_lock module_dispatch disable swap
+    else
+        local size
+        size="$(read_choice "Размер swap" "2G")"
+        confirm "Создать swap размером $size?" "N" &&
+            with_manager_lock module_dispatch enable swap "$size"
+    fi
+}
+
+tui_ipv6_action() {
+    echo ""
+    if [[ -n "$IPV6_METHOD" ]]; then
+        printf '  IPv6 отключён методом %s.\n' "$IPV6_METHOD"
+        confirm "Включить IPv6 обратно?" "N" &&
+            with_manager_lock module_dispatch disable ipv6
+    else
+        echo "  IPv6 сейчас включён."
+        echo "  sysctl — применить сразу; grub — применить после reboot."
+        local method
+        method="$(read_choice "Метод отключения: sysctl/grub" "sysctl")"
+        confirm "Отключить IPv6 методом $method?" "N" &&
+            with_manager_lock module_dispatch enable ipv6 "$method"
+    fi
+}
+
+tui_sudo_timeout_action() {
+    echo ""
+    echo "  Увеличивает срок действия sudo-сессии до 60 минут."
+    if [[ "$SUDO_TIMEOUT_ENABLED" == "true" ]]; then
+        confirm "Вернуть стандартный sudo timeout?" "N" &&
+            with_manager_lock module_dispatch disable sudo-timeout
+    else
+        confirm "Установить sudo timeout 60 минут?" "N" &&
+            with_manager_lock module_dispatch enable sudo-timeout
+    fi
+}
+
+tui_docker_group_action() {
+    echo ""
+    echo "  Разрешает административному пользователю запускать Docker без sudo."
+    if [[ "$DOCKER_GROUP_ADDED" == "true" ]]; then
+        confirm "Удалить управляемое членство в docker group?" "N" &&
+            with_manager_lock module_dispatch disable docker-group
+    else
+        confirm "Добавить пользователя в docker group?" "N" &&
+            with_manager_lock module_dispatch enable docker-group
+    fi
 }
 
 tui_modules_menu() {
     while true; do
         clear_screen
         show_banner
-        module_list
+        echo "  ДОПОЛНИТЕЛЬНЫЕ НАСТРОЙКИ"
         echo ""
-        echo "  [1] Swap (рекомендуется при RAM < 2 GiB)"
-        echo "  [2] IPv6 / Marzban"
-        echo "  [3] sudo timeout"
-        echo "  [4] Docker group"
-        echo "  [5] ICMP limiter (experimental)"
+        printf '  [1] Swap                %s\n' \
+            "$([[ -n "$MANAGED_SWAPFILE" ]] && echo "включён" || echo "выключен")"
+        echo "      Полезен при небольшом объёме RAM"
+        printf '  [2] IPv6                %s\n' \
+            "$([[ -n "$IPV6_METHOD" ]] && echo "отключён ($IPV6_METHOD)" || echo "включён")"
+        echo "      Включение или отключение IPv6"
+        printf '  [3] Sudo timeout        %s\n' \
+            "$([[ "$SUDO_TIMEOUT_ENABLED" == "true" ]] && echo "60 минут" || echo "стандартный")"
+        echo "      Время действия авторизации sudo"
+        printf '  [4] Docker group        %s\n' \
+            "$([[ "$DOCKER_GROUP_ADDED" == "true" ]] && echo "включена" || echo "выключена")"
+        echo "      Запуск Docker без sudo"
         echo "  [0] Назад"
-        local choice action
-        choice="$(read_choice "Модуль" "0")"
-        [[ "$choice" == "0" ]] && return
-        action="$(read_choice "Действие: enable/disable" "enable")"
-        case "$choice" in
-            1)
-                local size
-                size="$(read_choice "Размер swap" "2G")"
-                with_manager_lock module_dispatch "$action" swap "$size"
-                ;;
-            2)
-                local method
-                method="$(read_choice "Метод: sysctl/grub" "sysctl")"
-                with_manager_lock module_dispatch "$action" ipv6 "$method"
-                ;;
-            3) with_manager_lock module_dispatch "$action" sudo-timeout ;;
-            4) with_manager_lock module_dispatch "$action" docker-group ;;
-            5) with_manager_lock module_dispatch "$action" icmp-rate-limit ;;
+
+        case "$(read_choice "Настройка" "0")" in
+            1) tui_swap_action; press_any_key ;;
+            2) tui_ipv6_action; press_any_key ;;
+            3) tui_sudo_timeout_action; press_any_key ;;
+            4) tui_docker_group_action; press_any_key ;;
+            0) return ;;
         esac
-        press_any_key
+    done
+}
+
+tui_status_menu() {
+    while true; do
+        clear_screen
+        show_banner
+        echo "  СОСТОЯНИЕ И ДИАГНОСТИКА"
+        echo ""
+        tui_show_dashboard
+        echo "  [1] Запустить полную диагностику"
+        echo "  [2] Показать подробный статус"
+        echo "  [3] Показать технический JSON"
+        echo "  [0] Назад"
+        case "$(read_choice "Выбор" "0")" in
+            1) health_check || true; press_any_key ;;
+            2) show_status; press_any_key ;;
+            3) show_status_json; press_any_key ;;
+            0) return ;;
+        esac
     done
 }
 
@@ -87,16 +253,21 @@ tui_backup_menu() {
     while true; do
         clear_screen
         show_banner
-        echo "  [1] Список snapshots"
+        local snapshot_count
+        snapshot_count="$(find "$BACKUP_DIR" -mindepth 1 -maxdepth 1 -type d \
+            2>/dev/null | wc -l)"
+        echo "  РЕЗЕРВНЫЕ КОПИИ И ОТКАТ"
+        printf '  Сохранённых snapshots: %s\n\n' "$snapshot_count"
+        echo "  [1] Показать snapshots"
         echo "  [2] Создать snapshot"
         echo "  [3] Восстановить snapshot"
-        echo "  [4] Откатить к initial snapshot"
+        echo "  [4] Откатить управляемые файлы к начальному состоянию"
         echo "  [0] Назад"
         case "$(read_choice "Выбор" "0")" in
             1) backup_list; press_any_key ;;
             2)
                 local label
-                label="$(read_choice "Метка" "manual")"
+                label="$(read_choice "Название snapshot" "manual")"
                 with_manager_lock backup_create "$label"
                 press_any_key
                 ;;
@@ -113,33 +284,76 @@ tui_backup_menu() {
     done
 }
 
+tui_maintenance_menu() {
+    while true; do
+        clear_screen
+        show_banner
+        echo "  ОБСЛУЖИВАНИЕ"
+        echo ""
+        printf '  Версия:              %s\n' "$VERSION"
+        printf '  Перезагрузка:        %s\n\n' \
+            "$(reboot_required_now && echo "требуется" || echo "не требуется")"
+        echo "  [1] Обновить VPSSetup"
+        echo "  [2] Показать последние 100 строк журнала"
+        echo "  [3] Перезагрузить сервер"
+        echo "  [9] Удалить VPSSetup"
+        echo "  [0] Назад"
+        case "$(read_choice "Выбор" "0")" in
+            1) with_manager_lock manager_update; press_any_key ;;
+            2)
+                touch "$LOG_FILE"
+                tail -n 100 "$LOG_FILE"
+                press_any_key
+                ;;
+            3)
+                if confirm "Перезагрузить сервер сейчас?" "N"; then
+                    run_systemctl reboot
+                    return
+                fi
+                ;;
+            9)
+                if with_manager_lock manager_uninstall; then
+                    exit 0
+                fi
+                press_any_key
+                ;;
+            0) return ;;
+        esac
+    done
+}
+
+tui_recommended_action() {
+    case "$PHASE" in
+        unconfigured) with_manager_lock run_setup_wizard ;;
+        ssh_pending) with_manager_lock ssh_confirm ;;
+        configured) health_check || true ;;
+    esac
+}
+
 show_main_menu() {
     require_root menu || return 1
     while true; do
         clear_screen
         show_banner
-        printf '  Фаза: %-16s SSH: %-5s  UFW: %s\n' \
-            "$PHASE" "$SSH_PORT" "$(ufw_status_summary)"
-        printf '  Admin: %-15s Reboot required: %s\n\n' \
-            "$ADMIN_USER" "$(reboot_required_now && echo yes || echo no)"
-        echo "  [1] Первый setup / восстановление"
-        echo "  [2] SSH hardening"
-        echo "  [3] Опциональные модули"
-        echo "  [4] Status"
-        echo "  [5] Health"
-        echo "  [6] Snapshots / rollback"
-        echo "  [7] Update"
-        echo "  [8] Uninstall manager"
+        tui_show_dashboard
+        case "$PHASE" in
+            unconfigured) echo "  [1] Начать настройку" ;;
+            ssh_pending) echo "  [1] Подтвердить новый SSH-порт" ;;
+            configured) echo "  [1] Проверить состояние" ;;
+        esac
+        echo "  [2] Состояние и диагностика"
+        echo "  [3] SSH и сетевой доступ"
+        echo "  [4] Дополнительные настройки"
+        echo "  [5] Резервные копии и откат"
+        echo "  [6] Обслуживание"
         echo "  [0] Выход"
         case "$(read_choice "Выбор" "0")" in
-            1) with_manager_lock run_setup_wizard; press_any_key ;;
-            2) tui_ssh_menu ;;
-            3) tui_modules_menu ;;
-            4) show_status; press_any_key ;;
-            5) health_check || true; press_any_key ;;
-            6) tui_backup_menu ;;
-            7) with_manager_lock manager_update; press_any_key ;;
-            8) with_manager_lock manager_uninstall; return ;;
+            1) tui_recommended_action; press_any_key ;;
+            2) tui_status_menu ;;
+            3) tui_ssh_menu ;;
+            4) tui_modules_menu ;;
+            5) tui_backup_menu ;;
+            6) tui_maintenance_menu ;;
             0) return ;;
         esac
     done

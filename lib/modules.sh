@@ -255,79 +255,11 @@ module_docker_group_disable() {
     log_success "Управляемое членство в docker group снято"
 }
 
-icmp_remove_managed_block() {
-    local file="$1"
-    local tmp
-    tmp="$(mktemp)"
-    awk '
-        /^# vpssetup:icmp-rate-limit begin$/ {skip=1; next}
-        /^# vpssetup:icmp-rate-limit end$/ {skip=0; next}
-        !skip {print}
-    ' "$file" >"$tmp"
-    chmod --reference="$file" "$tmp" 2>/dev/null || chmod 640 "$tmp"
-    mv "$tmp" "$file"
-}
-
-module_icmp_enable() {
-    require_root module icmp-rate-limit enable || return 1
-    local file tmp
-    file="$(system_path /etc/ufw/before.rules)"
-    [[ -f "$file" ]] || {
-        die "Не найден $file"
-        return 1
-    }
-    backup_create "pre-module-icmp" || return 1
-    icmp_remove_managed_block "$file"
-    tmp="$(mktemp)"
-    awk '
-        BEGIN {inserted=0}
-        !inserted && /-A ufw-before-input -p icmp --icmp-type echo-request -j ACCEPT/ {
-            print "# vpssetup:icmp-rate-limit begin"
-            print "-A ufw-before-input -p icmp --icmp-type echo-request -m limit --limit 1/second --limit-burst 4 -j ACCEPT"
-            print "-A ufw-before-input -p icmp --icmp-type echo-request -j DROP"
-            print "# vpssetup:icmp-rate-limit end"
-            inserted=1
-            next
-        }
-        {print}
-        END {if (!inserted) exit 42}
-    ' "$file" >"$tmp" || {
-        rm -f "$tmp"
-        die "Не найдено стандартное echo-request правило UFW"
-        return 1
-    }
-    chmod --reference="$file" "$tmp" 2>/dev/null || chmod 640 "$tmp"
-    mv "$tmp" "$file"
-
-    if ! is_test_mode && command_exists iptables-restore; then
-        iptables-restore --test <"$file" || {
-            die "before.rules не прошёл iptables-restore --test"
-            return 1
-        }
-    fi
-    is_test_mode || ufw reload || return 1
-    ICMP_LIMIT_ENABLED="true"
-    save_state
-    log_success "ICMP echo-request ограничен до 1/s, burst 4 (IPv4)"
-}
-
-module_icmp_disable() {
-    require_root module icmp-rate-limit disable || return 1
-    local file
-    file="$(system_path /etc/ufw/before.rules)"
-    [[ -f "$file" ]] && icmp_remove_managed_block "$file"
-    is_test_mode || ufw reload || return 1
-    ICMP_LIMIT_ENABLED="false"
-    save_state
-    log_success "ICMP rate-limit удалён"
-}
-
 module_list() {
     printf '  %-18s %s\n' "swap" "${MANAGED_SWAPFILE:-off}"
     printf '  %-18s %s\n' "ipv6" "${IPV6_METHOD:-off}"
     printf '  %-18s %s\n' "sudo-timeout" "$SUDO_TIMEOUT_ENABLED"
     printf '  %-18s %s\n' "docker-group" "$DOCKER_GROUP_ADDED"
-    printf '  %-18s %s\n' "icmp-rate-limit" "$ICMP_LIMIT_ENABLED"
 }
 
 module_dispatch() {
@@ -343,7 +275,6 @@ module_dispatch() {
                 ipv6) module_ipv6_enable "${1:-sysctl}" ;;
                 sudo-timeout) module_sudo_timeout_enable ;;
                 docker-group) module_docker_group_enable ;;
-                icmp-rate-limit) module_icmp_enable ;;
                 *) die "Неизвестный модуль: $name"; return 1 ;;
             esac
             ;;
@@ -353,7 +284,6 @@ module_dispatch() {
                 ipv6) module_ipv6_disable ;;
                 sudo-timeout) module_sudo_timeout_disable ;;
                 docker-group) module_docker_group_disable ;;
-                icmp-rate-limit) module_icmp_disable ;;
                 *) die "Неизвестный модуль: $name"; return 1 ;;
             esac
             ;;

@@ -38,10 +38,10 @@ show_status_json() {
     printf '"fail2ban":{"healthy":%s},' "$f2b"
     printf '"unattended_upgrades":{"configured":%s},' \
         "$([[ -f "$(system_path /etc/apt/apt.conf.d/52vpssetup-auto-upgrades)" ]] && echo true || echo false)"
-    printf '"modules":{"swap":%s,"ipv6":"%s","sudo_timeout":%s,"docker_group":%s,"icmp_rate_limit":%s},' \
+    printf '"modules":{"swap":%s,"ipv6":"%s","sudo_timeout":%s,"docker_group":%s},' \
         "$([[ -n "$MANAGED_SWAPFILE" ]] && echo true || echo false)" \
         "$(json_escape "${IPV6_METHOD:-off}")" \
-        "$SUDO_TIMEOUT_ENABLED" "$DOCKER_GROUP_ADDED" "$ICMP_LIMIT_ENABLED"
+        "$SUDO_TIMEOUT_ENABLED" "$DOCKER_GROUP_ADDED"
     printf '"reboot_required":%s,' "$reboot"
     printf '"drift":%s' "$drift"
     printf '}\n'

@@ -203,19 +203,6 @@ assert_contains "$TEST_ROOT/var/lib/vpssetup/state.conf" "DOCKER_GROUP_ADDED='tr
 run_vpssetup module disable docker-group >/dev/null
 pass "Docker group module lifecycle"
 
-run_vpssetup module enable icmp-rate-limit >/dev/null
-assert_contains "$TEST_ROOT/etc/ufw/before.rules" '# vpssetup:icmp-rate-limit begin'
-first_limit="$(grep -n -- '--limit 1/second' "$TEST_ROOT/etc/ufw/before.rules" | cut -d: -f1)"
-commit_line="$(grep -n '^COMMIT$' "$TEST_ROOT/etc/ufw/before.rules" | cut -d: -f1)"
-((first_limit < commit_line)) || fail "ICMP rule order"
-if grep -qx -- '-A ufw-before-input -p icmp --icmp-type echo-request -j ACCEPT' \
-    "$TEST_ROOT/etc/ufw/before.rules"; then
-    fail "unlimited ICMP accept remains"
-fi
-run_vpssetup module disable icmp-rate-limit >/dev/null
-assert_not_contains "$TEST_ROOT/etc/ufw/before.rules" '# vpssetup:icmp-rate-limit begin'
-pass "ICMP module placement and removal"
-
 mkdir -p "$TEST_ROOT/var/lib/vpssetup-test"
 touch "$TEST_ROOT/var/lib/vpssetup-test/ufw-active"
 printf '22\tvpssetup:ssh-stage-old\n' \
@@ -268,6 +255,14 @@ run_vpssetup status --json >"$TEST_ROOT/status.json"
 python3 -m json.tool "$TEST_ROOT/status.json" >/dev/null
 assert_contains "$TEST_ROOT/status.json" '"phase":"configured"'
 pass "stable JSON status"
+
+printf '0\n' | run_vpssetup >"$TEST_ROOT/tui-main.out"
+assert_contains "$TEST_ROOT/tui-main.out" 'Следующий шаг:'
+assert_contains "$TEST_ROOT/tui-main.out" '[2] Состояние и диагностика'
+assert_contains "$TEST_ROOT/tui-main.out" '[3] SSH и сетевой доступ'
+assert_contains "$TEST_ROOT/tui-main.out" '[6] Обслуживание'
+assert_not_contains "$TEST_ROOT/tui-main.out" 'Stage SSH'
+pass "informative state-driven TUI"
 
 printf "EVIL='\$(touch %s/pwned)'\n" "$TEST_ROOT" \
     >>"$TEST_ROOT/var/lib/vpssetup/state.conf"
