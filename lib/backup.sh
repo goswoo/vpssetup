@@ -1,5 +1,24 @@
 #!/usr/bin/env bash
 
+BACKUP_KEEP_RECENT=5
+
+backup_ids_newest_first() {
+    [[ -d "$BACKUP_DIR" ]] || return 0
+
+    local dir id created directory_mtime
+    while IFS= read -r dir; do
+        id="$(basename "$dir")"
+        created="$(sed -n '1p' "$dir/created-at" 2>/dev/null || true)"
+        if [[ ! "$created" =~ ^[0-9]{8}T[0-9]{6}\.[0-9]{9}Z$ ]]; then
+            created="${id:0:15}.000000000Z"
+        fi
+        directory_mtime="$(stat -c '%Y' "$dir" 2>/dev/null || echo 0)"
+        printf '%s\t%s\t%s\n' "$created" "$directory_mtime" "$id"
+    done < <(find "$BACKUP_DIR" -mindepth 1 -maxdepth 1 -type d) |
+        sort -t $'\t' -k1,1r -k2,2nr |
+        cut -f3-
+}
+
 managed_backup_paths() {
     cat <<'EOF'
 /etc/ssh/sshd_config.d/00-vpssetup.conf
@@ -19,9 +38,32 @@ managed_backup_paths() {
 EOF
 }
 
+backup_prune() {
+    local protected_id="${1:-}"
+    local kept=0 id
+
+    [[ -d "$BACKUP_DIR" ]] || return 0
+
+    while IFS= read -r id; do
+        [[ "$id" == "$INITIAL_BACKUP_ID" ]] && continue
+        if ((kept < BACKUP_KEEP_RECENT)); then
+            kept=$((kept + 1))
+            continue
+        fi
+        [[ -n "$protected_id" && "$id" == "$protected_id" ]] && continue
+        backup_validate_id "$id" || {
+            log_warn "Пропущен повреждённый snapshot при очистке: $id"
+            continue
+        }
+        rm -rf -- "${BACKUP_DIR:?}/$id"
+        log_info "Удалён старый snapshot: $id"
+    done < <(backup_ids_newest_first)
+}
+
 backup_create() {
     require_root backup create || return 1
     local label="${1:-manual}"
+    local protected_id="${2:-}"
     local timestamp id target manifest
     timestamp="$(date -u '+%Y%m%dT%H%M%SZ')"
     id="${timestamp}-$(safe_id "$label")"
@@ -52,7 +94,10 @@ backup_create() {
     done < <(managed_backup_paths)
 
     printf '%s\n' "$label" >"$target/label"
+    # VERSION is initialized by the main entrypoint before this library is sourced.
+    # shellcheck disable=SC2153
     printf '%s\n' "$VERSION" >"$target/version"
+    date -u '+%Y%m%dT%H%M%S.%NZ' >"$target/created-at"
     if ufw_is_active; then
         printf 'active\n' >"$target/ufw-state"
     else
@@ -67,6 +112,7 @@ backup_create() {
     save_state
     cp -a "$STATE_FILE" "$target/manager-state.conf"
     chmod -R go-rwx "$target"
+    backup_prune "$protected_id"
     log_success "Создан snapshot: $id"
 }
 
@@ -76,12 +122,46 @@ backup_list() {
         return 0
     fi
 
-    local dir id label
-    while IFS= read -r dir; do
-        id="$(basename "$dir")"
-        label="$(sed -n '1p' "$dir/label" 2>/dev/null || true)"
+    local id label
+    while IFS= read -r id; do
+        label="$(sed -n '1p' "$BACKUP_DIR/$id/label" 2>/dev/null || true)"
         printf '  %-34s %s\n' "$id" "$label"
-    done < <(find "$BACKUP_DIR" -mindepth 1 -maxdepth 1 -type d | sort -r)
+    done < <(backup_ids_newest_first)
+}
+
+backup_show() {
+    local id="${1:-}"
+    backup_validate_id "$id" || {
+        die "Snapshot не найден или повреждён: ${id:-<пусто>}"
+        return 1
+    }
+
+    local source="$BACKUP_DIR/$id"
+    local label version created ufw_state present relative file_state
+    label="$(sed -n '1p' "$source/label" 2>/dev/null || true)"
+    version="$(sed -n '1p' "$source/version" 2>/dev/null || true)"
+    created="$(sed -n '1p' "$source/created-at" 2>/dev/null || true)"
+    [[ -n "$created" ]] || created="${id:0:16}"
+    ufw_state="$(backup_ufw_state "$id")"
+
+    printf 'Snapshot: %s\n' "$id"
+    printf '  Метка: %s\n' "${label:-—}"
+    printf '  Создан UTC: %s\n' "$created"
+    printf '  Версия VPSSetup: %s\n' "${version:-—}"
+    printf '  UFW: %s\n' "$ufw_state"
+    printf '  Состояние менеджера: %s\n' \
+        "$([[ -r "$source/manager-state.conf" ]] && echo "сохранено" || echo "нет")"
+    printf '  Файлы:\n'
+
+    while IFS=$'\t' read -r present relative; do
+        [[ "$present" == "yes" || "$present" == "no" ]] || continue
+        if [[ "$present" == "yes" ]]; then
+            file_state="сохранён"
+        else
+            file_state="отсутствовал"
+        fi
+        printf '    %-12s /%s\n' "$file_state" "$relative"
+    done <"$source/manifest.tsv"
 }
 
 backup_validate_id() {
@@ -213,7 +293,7 @@ backup_restore() {
         die "Initial snapshot старого формата не содержит состояния UFW; rollback остановлен"
         return 1
     fi
-    backup_create "pre-restore-${id}" || return 1
+    backup_create "pre-restore-${id}" "$id" || return 1
     safety_id="$LAST_BACKUP_ID"
     safety_ufw_state="$(backup_ufw_state "$safety_id")"
     log_info "Восстановление файлов из $id"
@@ -244,6 +324,15 @@ backup_restore() {
             [[ -n "$LAST_BACKUP_ID" ]] || LAST_BACKUP_ID="$id"
             save_state
         fi
+    fi
+    backup_prune
+    if [[ -n "$LAST_BACKUP_ID" && ! -d "$BACKUP_DIR/$LAST_BACKUP_ID" ]]; then
+        local newest_id=""
+        while IFS= read -r newest_id; do
+            break
+        done < <(backup_ids_newest_first)
+        LAST_BACKUP_ID="$newest_id"
+        save_state
     fi
     log_success "Snapshot $id восстановлен"
 }

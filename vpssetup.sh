@@ -66,6 +66,7 @@ Usage:
   sudo vpssetup module enable|disable <name> [option]
   sudo vpssetup backup create [label]
   sudo vpssetup backup list
+  sudo vpssetup backup show <id>
   sudo vpssetup backup restore <id>
   sudo vpssetup rollback
   sudo vpssetup update
@@ -83,8 +84,9 @@ dispatch_backup() {
     case "$action" in
         create) with_manager_lock backup_create "${1:-manual}" ;;
         list) backup_list ;;
+        show) backup_show "${1:-}" ;;
         restore) with_manager_lock backup_restore "${1:-}" ;;
-        *) die "Использование: vpssetup backup create|list|restore"; return 1 ;;
+        *) die "Использование: vpssetup backup create|list|show|restore"; return 1 ;;
     esac
 }
 

@@ -250,35 +250,41 @@ tui_status_menu() {
 }
 
 tui_backup_menu() {
+    local snapshot_count id label
+
     while true; do
         clear_screen
         show_banner
-        local snapshot_count
         snapshot_count="$(find "$BACKUP_DIR" -mindepth 1 -maxdepth 1 -type d \
             2>/dev/null | wc -l)"
         echo "  РЕЗЕРВНЫЕ КОПИИ И ОТКАТ"
         printf '  Сохранённых snapshots: %s\n\n' "$snapshot_count"
         echo "  [1] Показать snapshots"
-        echo "  [2] Создать snapshot"
-        echo "  [3] Восстановить snapshot"
-        echo "  [4] Откатить управляемые файлы к начальному состоянию"
+        echo "  [2] Посмотреть snapshot"
+        echo "  [3] Создать snapshot"
+        echo "  [4] Восстановить snapshot"
+        echo "  [5] Откатить управляемые файлы к начальному состоянию"
         echo "  [0] Назад"
         case "$(read_choice "Выбор" "0")" in
             1) backup_list; press_any_key ;;
             2)
-                local label
+                backup_list
+                id="$(read_choice "Snapshot ID" "")"
+                backup_show "$id"
+                press_any_key
+                ;;
+            3)
                 label="$(read_choice "Название snapshot" "manual")"
                 with_manager_lock backup_create "$label"
                 press_any_key
                 ;;
-            3)
-                local id
+            4)
                 backup_list
                 id="$(read_choice "Snapshot ID" "")"
                 with_manager_lock backup_restore "$id"
                 press_any_key
                 ;;
-            4) with_manager_lock rollback_initial; press_any_key ;;
+            5) with_manager_lock rollback_initial; press_any_key ;;
             0) return ;;
         esac
     done

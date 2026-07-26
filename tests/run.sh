@@ -10,6 +10,7 @@ export VPSSETUP_ROOT="$TEST_ROOT"
 export VPSSETUP_TEST_MODE=1
 export VPSSETUP_INSTALL_DIR="$PROJECT_DIR"
 export NO_COLOR=1
+unset SSH_CONNECTION SSH_CLIENT SSH_TTY
 
 pass_count=0
 
@@ -168,6 +169,14 @@ assert_contains "$TEST_ROOT/var/lib/vpssetup/backups/$initial_id/manager-state.c
     "INITIAL_BACKUP_ID='$initial_id'"
 pass "initial snapshot"
 
+snapshot_view="$TEST_ROOT/snapshot-view.out"
+run_vpssetup backup show "$initial_id" >"$snapshot_view"
+assert_contains "$snapshot_view" "Snapshot: $initial_id"
+assert_contains "$snapshot_view" 'UFW: inactive'
+assert_contains "$snapshot_view" '/etc/default/ufw'
+assert_contains "$snapshot_view" 'Состояние менеджера: сохранено'
+pass "snapshot viewer"
+
 sed -i "s/^INITIAL_BACKUP_ID=.*/INITIAL_BACKUP_ID=''/" \
     "$TEST_ROOT/var/lib/vpssetup/backups/$initial_id/manager-state.conf"
 sed -i "s/^LAST_BACKUP_ID=.*/LAST_BACKUP_ID=''/" \
@@ -188,6 +197,34 @@ printf 'IPV6=no\n' >"$TEST_ROOT/etc/default/ufw"
 run_vpssetup backup restore "$restore_id" >/dev/null
 assert_contains "$TEST_ROOT/etc/default/ufw" 'IPV6=yes'
 pass "snapshot restore"
+
+for retention_index in 1 2 3 4 5 6 7; do
+    run_vpssetup backup create "retention-$retention_index" >/dev/null
+done
+snapshot_count="$(
+    find "$TEST_ROOT/var/lib/vpssetup/backups" \
+        -mindepth 1 -maxdepth 1 -type d | wc -l
+)"
+[[ "$snapshot_count" -eq 6 ]] ||
+    fail "snapshot retention kept $snapshot_count directories instead of 6"
+[[ -d "$TEST_ROOT/var/lib/vpssetup/backups/$initial_id" ]] ||
+    fail "snapshot retention removed initial snapshot"
+for retention_index in 1 2; do
+    if find "$TEST_ROOT/var/lib/vpssetup/backups" -maxdepth 1 \
+        -type d -name "*-retention-$retention_index" | grep -q .; then
+        fail "snapshot retention kept stale retention-$retention_index"
+    fi
+done
+for retention_index in 3 4 5 6 7; do
+    find "$TEST_ROOT/var/lib/vpssetup/backups" -maxdepth 1 \
+        -type d -name "*-retention-$retention_index" | grep -q . ||
+        fail "snapshot retention removed recent retention-$retention_index"
+done
+touch "$TEST_ROOT/var/lib/vpssetup/backups/$initial_id"
+newest_snapshot="$(run_vpssetup backup list | sed -n '1s/^  \([^ ]*\).*/\1/p')"
+[[ "$newest_snapshot" == *-retention-7 ]] ||
+    fail "snapshot list used directory mtime instead of snapshot timestamp"
+pass "snapshot retention"
 
 run_vpssetup module enable sudo-timeout >/dev/null
 assert_contains "$TEST_ROOT/etc/sudoers.d/90-vpssetup-timeout" 'timestamp_timeout=60'
