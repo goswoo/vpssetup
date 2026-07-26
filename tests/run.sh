@@ -97,6 +97,7 @@ assert_contains "$WIZARD_ROOT/wizard.out" 'Windows PowerShell'
 assert_contains "$WIZARD_ROOT/wizard.out" 'Приватный файл id_ed25519'
 assert_contains "$WIZARD_ROOT/var/lib/vpssetup/state.conf" "PHASE='ssh_pending'"
 assert_file "$WIZARD_ROOT/home/deploy/.ssh/authorized_keys"
+[[ -d "$WIZARD_ROOT/run/sshd" ]] || fail "sshd runtime directory"
 VPSSETUP_ROOT="$WIZARD_ROOT" VPSSETUP_TEST_MODE=1 \
     VPSSETUP_INSTALL_DIR="$PROJECT_DIR" NO_COLOR=1 \
     bash "$PROJECT_DIR/vpssetup.sh" ssh confirm >/dev/null
@@ -192,12 +193,19 @@ run_vpssetup module disable icmp-rate-limit >/dev/null
 assert_not_contains "$TEST_ROOT/etc/ufw/before.rules" '# vpssetup:icmp-rate-limit begin'
 pass "ICMP module placement and removal"
 
+mkdir -p "$TEST_ROOT/var/lib/vpssetup-test"
+touch "$TEST_ROOT/var/lib/vpssetup-test/ufw-active"
+printf '22\tvpssetup:ssh-stage-old\n' \
+    >"$TEST_ROOT/var/lib/vpssetup-test/ufw-rules"
+printf '55222\tvpssetup:ssh-target\n443\tvpssetup:https\n' \
+    >>"$TEST_ROOT/var/lib/vpssetup-test/ufw-rules"
 run_vpssetup ssh stage 55222 >/dev/null
 assert_contains "$TEST_ROOT/etc/ssh/sshd_config.d/00-vpssetup.conf" 'Port 22'
 assert_contains "$TEST_ROOT/etc/ssh/sshd_config.d/00-vpssetup.conf" 'Port 55222'
 assert_contains "$TEST_ROOT/etc/fail2ban/jail.d/10-vpssetup-sshd.local" 'port = 22,55222'
 assert_contains "$TEST_ROOT/var/lib/vpssetup/state.conf" "PHASE='ssh_pending'"
-pass "two-port SSH stage"
+assert_contains "$TEST_ROOT/var/lib/vpssetup/state.conf" "UFW_OLD_RULE_OWNED='true'"
+pass "two-port SSH stage recovers existing UFW rules"
 
 run_vpssetup ssh confirm >/dev/null
 assert_contains "$TEST_ROOT/etc/ssh/sshd_config.d/00-vpssetup.conf" 'PermitRootLogin no'

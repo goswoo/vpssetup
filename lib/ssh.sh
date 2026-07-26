@@ -42,9 +42,15 @@ EOF
 }
 
 validate_sshd_config() {
-    is_test_mode && return 0
-    local config
+    local config runtime_dir
     config="$(system_path /etc/ssh/sshd_config)"
+    runtime_dir="$(system_path /run/sshd)"
+    mkdir -p "$runtime_dir" || {
+        die "Не удалось создать $runtime_dir"
+        return 1
+    }
+    chmod 755 "$runtime_dir"
+    is_test_mode && return 0
     command_exists sshd || {
         die "sshd не найден"
         return 1
@@ -126,11 +132,6 @@ ssh_stage() {
     SSH_OLD_PORT="$current_port"
     SSH_PORT="$target_port"
 
-    ufw_prepare_stage "$SSH_OLD_PORT" "$SSH_PORT" || {
-        backup_restore_files "$safety_id" || true
-        return 1
-    }
-
     local content
     content="$(render_ssh_stage_config "$SSH_OLD_PORT" "$SSH_PORT" "$keep_hardening")"$'\n'
     atomic_write "$(ssh_dropin_path)" 600 "$content" || return 1
@@ -139,9 +140,14 @@ ssh_stage() {
         die "Staged SSH-конфиг отклонён; исходные файлы восстановлены"
         return 1
     }
+    ufw_prepare_stage "$SSH_OLD_PORT" "$SSH_PORT" || {
+        backup_restore_files "$safety_id" || true
+        reload_managed_services || true
+        return 1
+    }
     if ! reload_ssh || ! ensure_ssh_listener "$SSH_PORT"; then
         backup_restore_files "$safety_id" || true
-        reload_ssh || true
+        reload_managed_services || true
         die "Новый SSH-порт не открылся; выполнен rollback"
         return 1
     fi

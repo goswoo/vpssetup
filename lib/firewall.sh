@@ -10,10 +10,34 @@ ufw_is_active() {
 
 ufw_has_exact_allow() {
     local port="$1"
-    is_test_mode && return 1
+    if is_test_mode; then
+        local rules
+        rules="$(system_path /var/lib/vpssetup-test/ufw-rules)"
+        [[ -r "$rules" ]] && awk -F'\t' -v wanted="$port" \
+            '$1 == wanted {found=1} END {exit(found ? 0 : 1)}' "$rules"
+        return
+    fi
     ufw status 2>/dev/null |
         awk -v wanted="${port}/tcp" '
             $1 == wanted && $2 == "ALLOW" {found=1}
+            END {exit(found ? 0 : 1)}
+        '
+}
+
+ufw_has_owned_rule() {
+    local port="$1"
+    local comment="$2"
+    if is_test_mode; then
+        local rules
+        rules="$(system_path /var/lib/vpssetup-test/ufw-rules)"
+        [[ -r "$rules" ]] && awk -F'\t' -v wanted="$port" -v marker="$comment" \
+            '$1 == wanted && $2 == marker {found=1} END {exit(found ? 0 : 1)}' \
+            "$rules"
+        return
+    fi
+    ufw status 2>/dev/null |
+        awk -v wanted="${port}/tcp" -v marker="$comment" '
+            $1 == wanted && $2 == "ALLOW" && index($0, marker) {found=1}
             END {exit(found ? 0 : 1)}
         '
 }
@@ -24,8 +48,13 @@ ufw_add_owned_rule() {
     local state_variable="$3"
 
     if ufw_has_exact_allow "$port"; then
-        printf -v "$state_variable" '%s' "false"
-        log_info "UFW уже разрешает ${port}/tcp; правило не присваивается vpssetup"
+        if ufw_has_owned_rule "$port" "$comment"; then
+            printf -v "$state_variable" '%s' "true"
+            log_info "UFW уже содержит правило vpssetup для ${port}/tcp"
+        else
+            printf -v "$state_variable" '%s' "false"
+            log_info "UFW уже разрешает ${port}/tcp; правило не присваивается vpssetup"
+        fi
         return 0
     fi
 

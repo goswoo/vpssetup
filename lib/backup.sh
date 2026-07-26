@@ -118,7 +118,7 @@ validate_restored_system_files() {
     sudoers_dir="$(system_path /etc/sudoers.d)"
 
     if ! is_test_mode && command_exists sshd && [[ -r "$sshd_config" ]]; then
-        sshd -t -f "$sshd_config" || {
+        validate_sshd_config || {
             die "Восстановленный SSH-конфиг не прошёл sshd -t"
             return 1
         }
