@@ -9,7 +9,7 @@
 Подключитесь к серверу и выполните:
 
 ```bash
-wget -qO /tmp/vpssetup-install.sh https://raw.githubusercontent.com/goswoo/vpssetup/main/install.sh && sudo bash /tmp/vpssetup-install.sh
+wget -qO /tmp/vpssetup-install.sh "https://raw.githubusercontent.com/goswoo/vpssetup/main/install.sh?v=$(date +%s)" && sudo bash /tmp/vpssetup-install.sh
 ```
 
 Установщик сразу запустит мастер. Укажите административного пользователя,

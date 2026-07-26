@@ -7,6 +7,7 @@ INSTALL_DIR="${SYSTEM_ROOT%/}/opt/vpssetup"
 BIN_PATH="${SYSTEM_ROOT%/}/usr/local/bin/vpssetup"
 REPO="${VPSSETUP_REPO:-goswoo/vpssetup}"
 RAW_BASE_URL="${VPSSETUP_RAW_BASE_URL:-https://raw.githubusercontent.com/${REPO}/main}"
+CACHE_TOKEN="$(date +%s)-${RANDOM}"
 LIBRARIES=(
     colors utils state backup system firewall fail2ban ssh modules update status
     manager tui
@@ -27,6 +28,16 @@ download_file() {
     else
         die "нужен curl или wget"
     fi
+}
+
+download_source() {
+    local relative="$1"
+    local destination="$2"
+    local url="$RAW_BASE_URL/$relative"
+    if [[ "$url" == http://* || "$url" == https://* ]]; then
+        url="${url}?v=${CACHE_TOKEN}"
+    fi
+    download_file "$url" "$destination"
 }
 
 if [[ "${VPSSETUP_TEST_MODE:-0}" != "1" && "$(id -u)" -ne 0 ]]; then
@@ -52,10 +63,10 @@ else
         die "некорректный GitHub repository: $REPO"
     SOURCE_DIR="$TEMP_DIR/source"
     mkdir -p "$SOURCE_DIR/lib"
-    download_file "$RAW_BASE_URL/vpssetup.sh" "$SOURCE_DIR/vpssetup.sh"
-    download_file "$RAW_BASE_URL/version" "$SOURCE_DIR/version"
+    download_source "vpssetup.sh" "$SOURCE_DIR/vpssetup.sh"
+    download_source "version" "$SOURCE_DIR/version"
     for library in "${LIBRARIES[@]}"; do
-        download_file "$RAW_BASE_URL/lib/${library}.sh" \
+        download_source "lib/${library}.sh" \
             "$SOURCE_DIR/lib/${library}.sh"
     done
 fi
