@@ -166,6 +166,39 @@ ssh_stage() {
     log_info "Из новой сессии выполните: sudo vpssetup ssh confirm"
 }
 
+ssh_session_port() {
+    local connection="${SSH_CONNECTION:-}"
+    local port=""
+    if [[ -n "$connection" ]]; then
+        port="$(awk 'NF >= 4 {print $4; exit}' <<<"$connection")"
+        if validate_port "$port"; then
+            printf '%s\n' "$port"
+            return 0
+        fi
+    fi
+
+    local pid="$PPID"
+    local parent=""
+    while [[ "$pid" =~ ^[0-9]+$ ]] && ((pid > 1)); do
+        if [[ -r "/proc/$pid/environ" ]]; then
+            connection="$(
+                tr '\0' '\n' <"/proc/$pid/environ" |
+                    sed -n 's/^SSH_CONNECTION=//p' |
+                    head -n1
+            )"
+            port="$(awk 'NF >= 4 {print $4; exit}' <<<"$connection")"
+            if validate_port "$port"; then
+                printf '%s\n' "$port"
+                return 0
+            fi
+        fi
+        parent="$(awk '/^PPid:/ {print $2; exit}' "/proc/$pid/status" 2>/dev/null)"
+        [[ "$parent" =~ ^[0-9]+$ && "$parent" != "$pid" ]] || break
+        pid="$parent"
+    done
+    return 1
+}
+
 ssh_confirm_session_is_safe() {
     is_test_mode && return 0
     if [[ "${1:-}" == "--force-console" ]]; then
@@ -178,9 +211,8 @@ ssh_confirm_session_is_safe() {
     fi
 
     [[ "${SUDO_USER:-}" == "$ADMIN_USER" ]] || return 1
-    [[ -n "${SSH_CONNECTION:-}" ]] || return 1
     local connected_port
-    connected_port="$(awk '{print $4}' <<<"$SSH_CONNECTION")"
+    connected_port="$(ssh_session_port)" || return 1
     [[ "$connected_port" == "$SSH_PORT" ]]
 }
 
