@@ -6,8 +6,7 @@ SYSTEM_ROOT="${VPSSETUP_ROOT:-}"
 INSTALL_DIR="${SYSTEM_ROOT%/}/opt/vpssetup"
 BIN_PATH="${SYSTEM_ROOT%/}/usr/local/bin/vpssetup"
 REPO="${VPSSETUP_REPO:-goswoo/vpssetup}"
-RAW_BASE_URL="${VPSSETUP_RAW_BASE_URL:-https://raw.githubusercontent.com/${REPO}/main}"
-CACHE_TOKEN="$(date +%s)-${RANDOM}"
+RAW_BASE_URL="${VPSSETUP_RAW_BASE_URL:-}"
 LIBRARIES=(
     colors utils state backup system firewall fail2ban ssh modules update status
     manager tui
@@ -33,11 +32,23 @@ download_file() {
 download_source() {
     local relative="$1"
     local destination="$2"
-    local url="$RAW_BASE_URL/$relative"
-    if [[ "$url" == http://* || "$url" == https://* ]]; then
-        url="${url}?v=${CACHE_TOKEN}"
-    fi
-    download_file "$url" "$destination"
+    download_file "$RAW_BASE_URL/$relative" "$destination"
+}
+
+resolve_github_raw_base() {
+    local metadata="$TEMP_DIR/github-commit.json"
+    local api_url
+    local commit=""
+    api_url="https://api.github.com/repos/${REPO}/commits/main?v=$(date +%s)-${RANDOM}"
+    download_file "$api_url" "$metadata"
+    commit="$(
+        sed -n 's/^[[:space:]]*"sha":[[:space:]]*"\([0-9a-fA-F]\{40\}\)",*$/\1/p' \
+            "$metadata" |
+            head -n1
+    )"
+    [[ "$commit" =~ ^[0-9a-fA-F]{40}$ ]] ||
+        die "не удалось определить commit ветки main"
+    printf 'https://raw.githubusercontent.com/%s/%s\n' "$REPO" "$commit"
 }
 
 if [[ "${VPSSETUP_TEST_MODE:-0}" != "1" && "$(id -u)" -ne 0 ]]; then
@@ -61,6 +72,9 @@ if [[ -f "$SCRIPT_DIR/vpssetup.sh" && -d "$SCRIPT_DIR/lib" ]]; then
 else
     [[ "$REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] ||
         die "некорректный GitHub repository: $REPO"
+    if [[ -z "$RAW_BASE_URL" ]]; then
+        RAW_BASE_URL="$(resolve_github_raw_base)"
+    fi
     SOURCE_DIR="$TEMP_DIR/source"
     mkdir -p "$SOURCE_DIR/lib"
     download_source "vpssetup.sh" "$SOURCE_DIR/vpssetup.sh"
